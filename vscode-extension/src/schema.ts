@@ -15,6 +15,8 @@ export interface Ts5250File {
   port?: number;
   tls?: boolean;
   ccsid?: number;
+  /** spoolのみ。スプール（SCS）の復号CCSID（`ccsid`とは別。未指定ならサーバーの既定） */
+  spoolCcsid?: number;
   katakanaVariant?: "katakana" | "katakana-ex";
   terminal?: "5250" | "3270";
   deviceName?: string;

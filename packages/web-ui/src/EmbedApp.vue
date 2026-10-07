@@ -278,6 +278,7 @@ const settingsInitial = computed<SettingsFormValues>(() => {
   if (c?.port !== undefined) v.port = c.port;
   if (c?.tls !== undefined) v.tls = c.tls;
   if (c?.ccsid !== undefined) v.ccsid = c.ccsid;
+  if (c?.spoolCcsid !== undefined) v.spoolCcsid = c.spoolCcsid;
   if (c?.katakanaVariant !== undefined) v.katakanaVariant = c.katakanaVariant;
   if (c?.terminal !== undefined) v.terminal = c.terminal;
   if (c?.screenSize !== undefined) v.screenSize = c.screenSize;

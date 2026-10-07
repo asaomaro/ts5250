@@ -175,6 +175,15 @@ describe("ready → loaded（接続はしない。decisions.md D17）", () => {
 });
 
 describe("接続ボタン → connect → systemRef解決（03-sql-ifs。emulatorへの拡張は`decisions.md` D12。ボタン化はD17）", () => {
+  it("**spool の設定ファイルの spoolCcsid が、サーバーへの登録（syncSystem）とペイロードへ乗る**（落とすと既定 273 で復号されて化ける）", async () => {
+    const { panel, syncSystem } = await setup('{"app":"spool","host":"AS400","ccsid":5035,"spoolCcsid":1399}');
+    panel.webview.fireMessage({ type: "connect" });
+    await flush();
+
+    expect(syncSystem.mock.calls[0]![1]).toMatchObject({ host: "AS400", ccsid: 5035, spoolCcsid: 1399 });
+    expect(lastPostedOfType(panel, "connect")?.payload).toMatchObject({ spoolCcsid: 1399 });
+  });
+
   it("emulator以外はsyncSystemを呼び、user/passwordを直接乗せずsystemRefを乗せる", async () => {
     const { panel, syncSystem } = await setup('{"app":"sql","host":"AS400","port":992,"signon":{"user":"U"}}');
     syncSystem.mockResolvedValueOnce("own:xyz");
@@ -261,6 +270,20 @@ describe("接続ボタン → connect → systemRef解決（03-sql-ifs。emulato
 });
 
 describe("save → WorkspaceEdit書き戻し → saved", () => {
+  it("spoolCcsid を保存する。外すと消える（`ccsid` と同じ）", async () => {
+    const { panel } = await setup('{"app":"spool","host":"OLD"}');
+    panel.webview.fireMessage({ type: "save", payload: { host: "NEW", spoolCcsid: 5035 } });
+    await flush();
+    const first = JSON.parse((applyEdit.mock.calls[0]![0] as { replacements: Array<{ text: string }> }).replacements[0]!.text) as { spoolCcsid?: number };
+    expect(first.spoolCcsid).toBe(5035);
+    expect(lastPostedOfType(panel, "saved")?.payload).toMatchObject({ spoolCcsid: 5035 });
+
+    panel.webview.fireMessage({ type: "save", payload: { host: "NEW" } });
+    await flush();
+    const second = JSON.parse((applyEdit.mock.calls[1]![0] as { replacements: Array<{ text: string }> }).replacements[0]!.text) as { spoolCcsid?: number };
+    expect(second.spoolCcsid).toBeUndefined();
+  });
+
   it("平文パスワードを暗号化してWorkspaceEditで書き戻し、savedを返す", async () => {
     const { panel, document } = await setup('{"app":"emulator","host":"OLD"}');
     panel.webview.fireMessage({
