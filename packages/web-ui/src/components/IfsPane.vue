@@ -5,6 +5,7 @@ import PaneSplitter from "./PaneSplitter.vue";
 import { usePaneSplit } from "../composables/usePaneSplit.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import { useIfsTree } from "../composables/useIfsTree.js";
+import { IFS_SORT_KEYS, isIfsSortKey, sortEntries, type IfsSortDir, type IfsSortKey } from "../composables/ifsSort.js";
 import { usePreview } from "../composables/usePreview.js";
 import {
   IfsRequestError,
@@ -97,7 +98,36 @@ const message = ref("");
 const actionError = ref("");
 
 const currentNode = computed(() => tree.nodeAt(currentPath.value));
-const entries = computed(() => currentNode.value.entries);
+
+/**
+ * **並び順**（既定はサーバーが返した順＝従来どおり）。選びは**このブラウザの好み**なので `localStorage` に覚える
+ * （壊れていても・使えなくても、既定で動く。サーバーや設定ファイルへは出さない）。
+ * 並べ替えるのは読み込み済みの分だけ（`ifsSort.ts`）。続きを読むと並べ直される
+ */
+const SORT_STORAGE = "ts5250.ifs.sort";
+function loadSort(): { key: IfsSortKey; dir: IfsSortDir } {
+  try {
+    const v = JSON.parse(localStorage.getItem(SORT_STORAGE) ?? "null") as { key?: unknown; dir?: unknown } | null;
+    if (v && isIfsSortKey(v.key)) return { key: v.key, dir: v.dir === "desc" ? "desc" : "asc" };
+  } catch {
+    /* 無い・壊れている・使えない（プライベートウィンドウ等）は既定へ */
+  }
+  return { key: "server", dir: "asc" };
+}
+const sortKey = ref<IfsSortKey>(loadSort().key);
+const sortDir = ref<IfsSortDir>(loadSort().dir);
+watch([sortKey, sortDir], () => {
+  try {
+    localStorage.setItem(SORT_STORAGE, JSON.stringify({ key: sortKey.value, dir: sortDir.value }));
+  } catch {
+    /* 覚えられなくても動く */
+  }
+});
+function toggleSortDir(): void {
+  sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
+}
+
+const entries = computed(() => sortEntries(currentNode.value.entries, sortKey.value, sortDir.value));
 /** 続きはあるが辿れない場所（`/QSYS.LIB` など） */
 const blocked = computed(() => currentNode.value.blocked === true);
 const hasMore = computed(() => currentNode.value.state === "partial" && !blocked.value);
@@ -131,7 +161,8 @@ interface TreeRow {
 
 function walk(path: string, depth: number, out: TreeRow[]): void {
   const node = tree.nodes.value.get(path);
-  for (const e of node?.entries ?? []) {
+  // ツリーも一覧と同じ並びにする（片方だけ違うと、同じフォルダが別の場所に見える）
+  for (const e of sortEntries(node?.entries ?? [], sortKey.value, sortDir.value)) {
     if (!e.isDirectory) continue;
     const child = path === "/" ? `/${e.name}` : `${path}/${e.name}`;
     const childOpen = tree.expanded.value.has(child);
@@ -811,6 +842,24 @@ void (async () => {
         ホスト側で増えた・消えたものを見るには、明示的な入口が要る。
       -->
       <button :disabled="disabled" title="いまのフォルダを取り直す" @click="reload">再読み込み</button>
+      <!--
+        **並び順**。フォルダは常に先。サーバー順（既定）は並べ替えない。
+        読み込み済みの分だけが対象（続きがあるときは下の注記で伝える）
+      -->
+      <label class="sort">
+        並び順
+        <select v-model="sortKey" aria-label="並び順">
+          <option v-for="k in IFS_SORT_KEYS" :key="k.key" :value="k.key">{{ k.label }}</option>
+        </select>
+      </label>
+      <button
+        :disabled="disabled || sortKey === 'server'"
+        :aria-label="sortDir === 'asc' ? '昇順（押すと降順）' : '降順（押すと昇順）'"
+        :title="sortDir === 'asc' ? '昇順（押すと降順）' : '降順（押すと昇順）'"
+        @click="toggleSortDir"
+      >
+        {{ sortDir === "asc" ? "↑" : "↓" }}
+      </button>
       <button :disabled="disabled" @click="createFolder">新規フォルダ</button>
       <button :disabled="disabled" @click="downloadFolder">まとめてダウンロード</button>
       <!-- label ではなく button から input を叩く。hidden な input はキーボードで到達できない -->
@@ -1045,6 +1094,9 @@ void (async () => {
       <span v-else-if="blocked" class="note">
         この場所は先頭 {{ entries.length }} 件までしか取得できません
       </span>
+      <span v-if="(hasMore || blocked) && sortKey !== 'server'" class="note">
+        並べ替えは読み込み済みの分だけです
+      </span>
     </footer>
   </div>
 </template>
@@ -1063,6 +1115,14 @@ header {
   gap: 8px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--line);
+}
+/* 並び順の選択。ヘッダーの操作ボタンと同じ行に収める */
+.sort {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
 }
 .crumbs {
   display: flex;
