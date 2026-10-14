@@ -19,6 +19,15 @@
 - D15: `ts5250ctl` は MCP のクライアント（Streamable HTTP）。ツール一覧・入力スキーマはサーバーから取り、型は `type` で変換する（数・真偽・JSON）。専用のサブコマンドは持たない（ツールが増えても追従不要）。
 - D16: 当初の「`--profile` で `profiles.local.json` を読む」は不要になった。サーバーの `ConfigResolver` が暗号化パスワードの復号まで行うので、`ts5250 [セッション名]` がそれを使う（実機 PUB400 でサインオン済みのメニューまで確認）。
 
+## 第 5 段（継続欄・語送り欄。利用者の指示「第 4 段を進めて」2026-10-14）
+- D17: 継続した（EDTMSK の）SBCS 欄は、区間の並びを合成バッファへつないで `fieldEdit` の純関数を掛け、区間ごとに割り戻す（web-ui `editAcrossContinued` と同じ手順）。編集結果は `EditOutcome.also` で他の区間の値を運び、controller が `setField` する。Tab の停止点は並びの先頭区間だけ（`isTabStopField`）。
+- D18: 語送り欄は空きを NUL で持ち、打鍵・Delete・Backspace のあとに `wordWrap` を掛ける。送る値は末尾の NUL を落とし、途中の NUL は `DEAD_MARK`（core が運ぶセンチネル）。`overlayField` は `DEAD_MARK` を空白の桁として描く。
+- D19: 継続した語送り欄・継続した O 欄（鎖）・J/E/G は引き続き「未対応」と知らせて値を変えない。O 鎖は `oChainCells` の純関数があるので次の候補。
+
+## 未確認（第 5 段）
+- 継続欄・語送り欄とも偽のセッション（記録の画面の欄を書き換えたもの）でだけ確認した。実機（EDTMSK・WRDWRAP の画面）では未確認。
+- 語送り欄の Field Exit（NUL 詰め）・継続欄の符号桁・満杯後の自動送りは web-ui との一致を試験していない。
+
 ## 未確認（第 1 段）
 - 実機（IBM i）: 利用者の指示で PUB400 に接続し、サインオン・メニュー表示・数字入力・Enter での画面遷移を確認した（接続先・認証は記録しない）。挿入・Delete・全角入力の実機確認は第 3 段の分が未実施。
 - Windows Terminal / VS Code 端末での表示は、利用者の判断（sodashitsu の端末版で表示できている）に依る。当 PJ では未実測。

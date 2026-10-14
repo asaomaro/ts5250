@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import { TerminalController, KeyDecoder, type SessionLike } from "../src/index.js";
 import { sessionFrom } from "./helpers.js";
 import { MSG_BY_REASON, MSG_NO_ROOM } from "../src/app/editing.js";
-import { SO_MARK, SI_MARK } from "@ts5250/tn5250/edit/fieldValidate";
+import type { Field } from "@ts5250/tn5250";
+import type { KeyEvent } from "../src/index.js";
+import { SO_MARK, SI_MARK, DEAD_MARK } from "@ts5250/tn5250/edit/fieldValidate";
 
 const keys = (s: string) => new KeyDecoder().feed(s);
 async function press(c: TerminalController, s: string): Promise<void> {
@@ -198,5 +200,67 @@ describe("TerminalController の O 欄（SO/SI 補完）", () => {
 
   it("MSG の語彙を実体で参照している", () => {
     expect(MSG_NO_ROOM).toBe("挿入する余地がありません");
+  });
+});
+
+/** 継続欄・語送り欄は実機の記録に無いので、記録の画面の欄を書き換えた偽のセッションで糊を確かめる（実機は未確認） */
+describe("TerminalController の継続欄・語送り欄（第 4 段）", () => {
+  async function fake(fieldsOf: (proto: Field) => Field[]) {
+    const real = await sessionFrom("pub400-signon-to-menu");
+    const base = real.snapshot();
+    const proto = base.fields.find((f) => !f.protected)!;
+    const fields = fieldsOf(proto);
+    const snap = { ...base, fields };
+    const sess: SessionLike = {
+      snapshot: () => snap,
+      sendAid: async () => undefined,
+      setField: (t, v) => {
+        const f = fields.find((x) => x.index === t.index);
+        if (f) f.value = v;
+      },
+      dismissHostError: () => false,
+      disconnect: () => undefined
+    };
+    return { sess, fields };
+  }
+  const seg = (proto: Field, index: number, col: number, cont: "first" | "middle" | "last", value: string) =>
+    ({ ...proto, index, row: 5, col, length: 2, continued: cont, value });
+
+  it("継続欄: 区間の終わりまで打つと次の区間の先頭へ進む", async () => {
+    const { sess, fields } = await fake((p) => [seg(p, 90, 10, "first", ""), seg(p, 91, 13, "middle", ""), seg(p, 92, 16, "last", "")]);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 10 };
+    await press(c, "123");
+    expect(fields.map((f) => f.value)).toEqual(["12", "3", ""]);
+    expect(c.cursor).toEqual({ row: 5, col: 14 });
+  });
+
+  it("継続欄: Delete は区間をまたいで詰める。Backspace は区間の頭で前の区間の末尾を消す", async () => {
+    const { sess, fields } = await fake((p) => [seg(p, 90, 10, "first", "12"), seg(p, 91, 13, "middle", "34"), seg(p, 92, 16, "last", "56")]);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 10 };
+    await c.handle({ kind: "key", name: "Delete" } as KeyEvent);
+    expect(fields.map((f) => f.value)).toEqual(["23", "45", "6"]);
+    c.cursor = { row: 5, col: 13 };
+    await c.handle({ kind: "key", name: "Backspace" } as KeyEvent);
+    expect(fields.map((f) => f.value)).toEqual(["24", "56", ""]);
+    expect(c.cursor).toEqual({ row: 5, col: 11 });
+  });
+
+  it("継続欄: Field Exit は続く区間まで消す", async () => {
+    const { sess, fields } = await fake((p) => [seg(p, 90, 10, "first", "12"), seg(p, 91, 13, "middle", "34"), seg(p, 92, 16, "last", "56")]);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 11 };
+    await press(c, "\x1d" + "e");
+    expect(fields.map((f) => f.value)).toEqual(["1", "", ""]);
+  });
+
+  it("語送り: 行末にかかった語は次の行へ送り、行の残りは空き（NUL）で埋める", async () => {
+    const { sess, fields } = await fake((p) => [{ ...p, index: 90, row: 5, col: 75, length: 10, wordWrap: true, monocase: false, value: "ab cd" }]);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 80 };
+    await press(c, "e");
+    expect(fields[0].value).toBe(`ab ${DEAD_MARK}${DEAD_MARK}${DEAD_MARK}cde`);
+    expect(c.note).toBe("");
   });
 });

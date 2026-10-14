@@ -7,7 +7,7 @@
  */
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import { fieldSlices } from "@ts5250/tn5250/edit/fieldSlices";
-import { SO_MARK, SI_MARK, isWideForDbcs } from "@ts5250/tn5250/edit/fieldValidate";
+import { SO_MARK, SI_MARK, isDeadMark, isWideForDbcs } from "@ts5250/tn5250/edit/fieldValidate";
 
 /** 編集値 1 つ分の桁の並び。O 欄の SO/SI の印・全角（2 桁）・空き（NUL）を桁へ展開する */
 function toCells(value: string, proto: Cell, width: number): Cell[] {
@@ -22,7 +22,7 @@ function toCells(value: string, proto: Cell, width: number): Cell[] {
   for (const ch of value) {
     if (ch === SO_MARK) out.push(mk("so", " "));
     else if (ch === SI_MARK) out.push(mk("si", " "));
-    else if (ch === "\u0000") out.push(mk("sbcs", " "));
+    else if (ch === "\u0000" || isDeadMark(ch)) out.push(mk("sbcs", " "));
     else if (isWideForDbcs(ch)) out.push(mk("dbcs-lead", ch), mk("dbcs-tail", " "));
     else out.push(mk("sbcs", ch));
   }

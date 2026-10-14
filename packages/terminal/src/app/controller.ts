@@ -11,6 +11,7 @@
 import type { AidKey, Field, ScreenSnapshot, SendAidOptions } from "@ts5250/tn5250";
 import { typeInto, deleteAt, backspaceAt, exitAt, MSG_FIELD_EXIT_KEY, type EditEnv, type EditOutcome } from "./editing.js";
 import { offsetOfPos } from "@ts5250/tn5250/edit/fieldSlices";
+import { isTabStopField } from "@ts5250/tn5250/edit/continuedRun";
 import type { KeyEvent } from "../input/decode.js";
 
 export interface SessionLike {
@@ -158,7 +159,8 @@ export class TerminalController {
   }
 
   private inputFields(snap: ScreenSnapshot): Field[] {
-    return snap.fields.filter((f) => !f.protected).sort((a, b) => a.row - b.row || a.col - b.col);
+    // 継続欄（EDTMSK の区間の並び）は先頭の区間だけが停止点（ACS は並び全体で 1 つの欄）
+    return snap.fields.filter((f) => !f.protected && isTabStopField(f)).sort((a, b) => a.row - b.row || a.col - b.col);
   }
 
   private fieldAt(snap: ScreenSnapshot, p = this.cursor): Field | undefined {
@@ -192,6 +194,7 @@ export class TerminalController {
     this.local++;
     try {
       this.session.setField({ index: f.index }, r.value);
+      for (const o of r.also ?? []) this.session.setField({ index: o.index }, o.value);
     } catch (e) {
       this.note = e instanceof Error ? e.message : String(e);
       return false;
@@ -230,7 +233,8 @@ export class TerminalController {
   private backspace(snap: ScreenSnapshot): void {
     if (this.locked(snap)) return;
     const f = this.fieldAt(snap);
-    if (!f || (f.row === this.cursor.row && this.cursor.col <= f.col)) {
+    // 継続欄は並びの先頭までは前の区間を消す（`backspaceAt` が並びの先頭で 0005）
+    if (!f || (f.continued === undefined && f.row === this.cursor.row && this.cursor.col <= f.col)) {
       this.move(snap, 0, -1);
       return;
     }
