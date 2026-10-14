@@ -292,3 +292,94 @@ describe("TerminalController の継続した O 欄（鎖）", () => {
     expect(c.note).toBe("");
   });
 });
+
+/** J・E・G 欄は実機の記録に無いので、記録の画面の欄を書き換えた偽のセッションで糊を確かめる（実機は未確認） */
+describe("TerminalController の J・E・G 欄（第 6 段）", () => {
+  async function fakeJeg(type: "only" | "pure" | "either", length: number, cellsOf?: (proto: import("@ts5250/tn5250").Cell) => import("@ts5250/tn5250").Cell[]) {
+    const real = await sessionFrom("pub400-signon-to-menu");
+    let snap = real.snapshot();
+    const proto = snap.fields.find((f) => !f.protected)!;
+    const field: Field = { ...proto, index: 90, row: 5, col: 10, length, dbcsType: type, value: "", fieldExitRequired: true };
+    // 欄の下の画面の文字を空き（生バイトを持たない空白）にする
+    const blank = snap.cells.map((r, i) => (i === 4 ? r.map((c) => { const b = { ...c, kind: "sbcs" as const, char: " " }; delete b.rawByte; return b; }) : r));
+    snap = { ...snap, cells: blank, fields: [field] };
+    const writes: string[] = [];
+    const sess: SessionLike = {
+      snapshot: () => snap,
+      sendAid: async () => undefined,
+      setField: (_t, v) => {
+        writes.push(v);
+        snap = overlayField(snap, field, v);
+      },
+      dismissHostError: () => false,
+      disconnect: () => undefined
+    };
+    void cellsOf;
+    return { sess, writes };
+  }
+
+  it("J: 全角を打つと SO 字 NUL の組 SI の形で送り、半角の空白は全角空白になる", async () => {
+    const { sess, writes } = await fakeJeg("only", 10);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 10 };
+    await press(c, "日");
+    expect(writes.at(-1)).toBe(`${SO_MARK}日${DEAD_MARK.repeat(6)}${SI_MARK}`);
+    expect(c.cursor).toEqual({ row: 5, col: 13 });
+    await press(c, " ");
+    expect(writes.at(-1)).toBe(`${SO_MARK}日\u3000${DEAD_MARK.repeat(4)}${SI_MARK}`);
+  });
+
+  it("J: 半角は打てない", async () => {
+    const { sess, writes } = await fakeJeg("only", 10);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 10 };
+    await press(c, "A");
+    expect(writes).toEqual([]);
+    expect(c.note).toBe(MSG_BY_REASON["dbcs-required"]);
+  });
+
+  it("G: SO/SI なしで全角空白を詰める。欄いっぱいまで打つと余地なし", async () => {
+    const { sess, writes } = await fakeJeg("pure", 4);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 10 };
+    await press(c, "日本");
+    expect(writes.at(-1)).toBe("日本");
+    await press(c, "語");
+    expect(c.note).not.toBe("");
+  });
+
+  it("E: 最初の字で半角・全角が決まり、途中で混ぜると理由を示して断る", async () => {
+    const { sess, writes } = await fakeJeg("either", 10);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 10 };
+    await press(c, "A");
+    expect(writes.at(-1)).toBe("A");
+    await press(c, "日");
+    expect(c.note).toContain("半角で入力中");
+    expect(writes.at(-1)).toBe("A");
+  });
+
+  it("J: 挿入は空きの桁へ押し出す", async () => {
+    const { sess, writes } = await fakeJeg("only", 12);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 11 };
+    await press(c, "あい");
+    c.cursor = { row: 5, col: 11 };
+    await c.handle({ kind: "key", name: "Insert" } as KeyEvent);
+    await press(c, "う");
+    expect(c.note).toBe("");
+    expect(writes.at(-1)).toBe(`${SO_MARK}うあい${DEAD_MARK.repeat(4)}${SI_MARK}`);
+  });
+
+  it("J: ホストが全角空白で埋めた欄にも挿入できる（末尾の全角空白は空き）", async () => {
+    const { sess, writes } = await fakeJeg("only", 12);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 11 };
+    await press(c, "あい\u3000\u3000\u3000");
+    c.cursor = { row: 5, col: 11 };
+    await c.handle({ kind: "key", name: "Insert" } as KeyEvent);
+    await press(c, "う");
+    expect(c.note).toBe("");
+    expect(writes.at(-1)).toBe(`${SO_MARK}うあい\u3000\u3000${SI_MARK}`);
+  });
+});

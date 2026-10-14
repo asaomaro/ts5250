@@ -29,6 +29,11 @@
 - 継続欄・語送り欄とも偽のセッション（記録の画面の欄を書き換えたもの）でだけ確認した。実機（EDTMSK・WRDWRAP の画面）では未確認。
 - 語送り欄の Field Exit（NUL 詰め）・継続欄の符号桁・満杯後の自動送りは web-ui との一致を試験していない。
 
+## 第 6 段（J・E・G 欄。利用者の指示 2026-10-14）
+- D21: J（only）・G（pure）・E（either）は `app/dbcsEditing.ts` に、web-ui `ScreenGrid.vue` の規則（`jeShapeOf`・`eitherModeSwitch`・`insertBudget`・全角空白への変換・末尾の全角空白を挿入の空きに数える）を小さく書き起こした。純関数として取り出せる形になっていないため二重化（D11 と同じ）。対象は 1 行に収まる欄。複数行・SI の無い全角の E（open）・継続した J/E/G は「未対応」と知らせて値を変えない。
+- 実機確認（PUB400・CCSID 1399・`JEEDIT`）: J1（上書き・E の半角↔全角の切り替え・0060 で送られない）の 6 欄と、J2（挿入・Delete・Backspace・0061）の 7 欄が、ACS の記録（`scripts/verify-browser-je-field.mjs` の `ACS`）と一致（全角の先頭バイトの 0x44→0x3f はホスト側の変換。第 5 段の記録を参照）。**J3（Alt+Delete・Erase EOF 系）は端末に割り当てが無く未実施**。
+- 実機で見つけた直し: ホストが `4040` で埋めた J には、末尾の全角空白を空きに数えないと挿入できなかった（偽のセッションでは気づけなかった）。
+
 ## 実機確認（第 5 段。PUB400・利用者の指示 2026-10-14）
 - テスト画面は `scripts/host-src/dscmd.c` に `CONTSB`（継続した SBCS 欄 3 区間）を足し、既存の `CONTOX`・`WRAPFLD` と一緒に利用者のライブラリへ `TTDSCMD` として作った（`CRTBNDC`。ホスト上の `/tmp/ttdscmd.c`・`/tmp/ttdscmd.log`）。
 - 継続欄: `CONTSB` で `789` を打つ → Delete → Enter。ホストが受け取った欄は `f7 f8 f9 f5 f6`（`78`・`9`＋次の区間の `5`・`6`）で、区間をまたぐ打鍵と詰め直しが想定どおり。

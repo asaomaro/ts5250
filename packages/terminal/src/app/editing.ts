@@ -22,11 +22,12 @@ import {
 import { chainInsert, chainOverwrite, chainDelete, chainBackspace, type ChainPos, type ChainResult } from "@ts5250/tn5250/edit/oChainCells";
 import { splitLead, SPLIT_TAIL } from "@ts5250/tn5250/browser";
 import { isFullWidth } from "@ts5250/base";
+import { isJeg, jegType, jegDelete, jegBackspace, jegExit } from "./dbcsEditing.js";
 
 export const MSG_NO_ROOM = "挿入する余地がありません";
 export const MSG_PROTECTED = "カーソルが保護された区域にあるため入力できません";
 export const MSG_SHIFT_POSITION = "この位置（全角の区切り）では操作できません";
-export const MSG_UNSUPPORTED = "この種類の欄の編集は未対応です（J・E・G・継続した語送り欄）";
+export const MSG_UNSUPPORTED = "この種類の欄の編集は未対応です（継続した J・E・G・継続した語送り欄）";
 export const MSG_FIELD_EXIT_KEY = "この項目は最終桁まで入力されています（Field Exit か Tab で項目を出てください）";
 
 /** 欄に打てない理由の表示（web-ui の `MSG_BY_REASON` と同じ文言） */
@@ -46,6 +47,8 @@ export interface EditEnv {
   insertMode: boolean;
   /** DBCS の CCSID でないセッション。幅の判定（`rejectReason`）を SBCS 向けにする */
   sbcsOnly: boolean;
+  /** E 欄の全角・半角の状態を、空にしても保つ記憶（欄の番号 → 全角か。AID の送信で捨てる） */
+  eitherMemory?: Map<number, boolean>;
 }
 
 /** 編集 1 回の結果。`value` を `setField` へ渡し、カーソルを `cursor` へ置く。`note` は操作員への一言 */
@@ -57,6 +60,8 @@ const fail = (note?: string): EditOutcome => (note === undefined ? { ok: false }
 
 /** 端末版が編集できる欄か */
 export function editable(f: Field): boolean {
+  // J・E・G: 継続・語送りは未対応（1 行に収まらない欄は dbcsEditing が知らせる）
+  if (isJeg(f)) return f.continued === undefined && f.wordWrap !== true;
   if (f.dbcsType === undefined) return !(f.continued !== undefined && f.wordWrap === true);
   // O 欄: 語送りは未対応（継続した鎖は oChainCells で編集する）
   return f.dbcsType === "open" && f.wordWrap !== true;
@@ -254,6 +259,7 @@ export function typeInto(f: Field, snap: ScreenSnapshot, pos: { row: number; col
   if (!editable(f)) return fail(MSG_UNSUPPORTED);
   const off = offsetAt(f, pos, env);
   if (off === undefined) return fail("ここには入力できません");
+  if (isJeg(f)) return jegType(f, snap, pos, raw, env, { noRoom: MSG_NO_ROOM, byReason: (w) => MSG_BY_REASON[w] });
   const ch = inputChar(raw, f, env);
   const why = rejectReason(f, ch, { sbcsOnly: env.sbcsOnly });
   if (why) return fail(MSG_BY_REASON[why]);
@@ -295,6 +301,7 @@ export function deleteAt(f: Field, snap: ScreenSnapshot, pos: { row: number; col
   if (!editable(f)) return fail(MSG_UNSUPPORTED);
   const off = offsetAt(f, pos, env);
   if (off === undefined) return fail();
+  if (isJeg(f)) return jegDelete(f, snap, pos, env);
   if (isContinued(f)) return acrossRun(f, snap, pos, env, del, false);
   if (isOChain(f)) return chainOp(f, snap, pos, env, (segs, at) => chainDelete(segs, at));
   const st = stateOf(f, snap, off, env);
@@ -310,6 +317,7 @@ export function backspaceAt(f: Field, snap: ScreenSnapshot, pos: { row: number; 
   if (!editable(f)) return fail(MSG_UNSUPPORTED);
   const off = offsetAt(f, pos, env);
   if (off === undefined) return fail();
+  if (isJeg(f)) return jegBackspace(f, snap, pos, env);
   if (isContinued(f)) {
     // 並びの先頭（先頭区間の桁 0）まで戻っていれば戻れない（0005）
     const g = runGeom(f, snap, env);
@@ -331,6 +339,7 @@ export function exitAt(f: Field, snap: ScreenSnapshot, pos: { row: number; col: 
   if (!editable(f)) return fail(MSG_UNSUPPORTED);
   const off = offsetAt(f, pos, env);
   if (off === undefined) return fail();
+  if (isJeg(f)) return jegExit(f, snap, pos, env);
   const st = stateOf(f, snap, off, env);
   if (isOpen(f)) {
     const span = fieldSpan(f, env.cols, env.rows);
