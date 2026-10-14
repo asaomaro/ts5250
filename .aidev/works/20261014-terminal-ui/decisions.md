@@ -31,7 +31,8 @@
 
 ## 第 6 段（J・E・G 欄。利用者の指示 2026-10-14）
 - D21: J（only）・G（pure）・E（either）は `app/dbcsEditing.ts` に、web-ui `ScreenGrid.vue` の規則（`jeShapeOf`・`eitherModeSwitch`・`insertBudget`・全角空白への変換・末尾の全角空白を挿入の空きに数える）を小さく書き起こした。純関数として取り出せる形になっていないため二重化（D11 と同じ）。対象は 1 行に収まる欄。複数行・SI の無い全角の E（open）・継続した J/E/G は「未対応」と知らせて値を変えない。
-- 実機確認（PUB400・CCSID 1399・`JEEDIT`）: J1（上書き・E の半角↔全角の切り替え・0060 で送られない）の 6 欄と、J2（挿入・Delete・Backspace・0061）の 7 欄が、ACS の記録（`scripts/verify-browser-je-field.mjs` の `ACS`）と一致（全角の先頭バイトの 0x44→0x3f はホスト側の変換。第 5 段の記録を参照）。**J3（Alt+Delete・Erase EOF 系）は端末に割り当てが無く未実施**。
+- 実機確認（PUB400・CCSID 1399・`JEEDIT`）: J1（上書き・E の半角↔全角の切り替え・0060 で送られない）の 6 欄と、J2（挿入・Delete・Backspace・0061）の 7 欄が、ACS の記録（`scripts/verify-browser-je-field.mjs` の `ACS`）と一致（全角の先頭バイトの 0x44→0x3f はホスト側の変換。第 5 段の記録を参照）。J3 は D22 のとおり実機で確認した。
+- D22: SI の無い全角の E（open）を足した。compact の E を SI より前から消すと SI も消え（`SO あ`）、全部消した後に打つと SI を付けない。実機 J3 の 7 欄が ACS の記録と一致（Alt+Delete は端末の Field Exit〔`Ctrl+] e`〕で代替。J・E は右寄せが無く、消去の結果は同じ）。2 字目以降を新しい `SO 字… SI` の組にする枝は実装したが、実機の J3 では通っていない（未確認）。
 - 実機で見つけた直し: ホストが `4040` で埋めた J には、末尾の全角空白を空きに数えないと挿入できなかった（偽のセッションでは気づけなかった）。
 
 ## 実機確認（第 5 段。PUB400・利用者の指示 2026-10-14）

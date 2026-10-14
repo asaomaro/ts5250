@@ -50,6 +50,7 @@ export class TerminalController {
   private readonly sbcsOnly: boolean;
   /** E 欄の全角・半角の状態（空にしても保つ。AID の送信で捨てる） */
   private readonly either = new Map<number, boolean>();
+  private readonly jeErased = new Set<number>();
   /** 自分の `setField` が起こす screen 事象で、カーソルをホストの位置へ戻さないための印 */
   private local = 0;
   private readonly prefix: string;
@@ -144,6 +145,7 @@ export class TerminalController {
     // 送信後の画面はホストが決めたカーソルから始める。挿入は 1 入力ごと（ACS）
     this.insertMode = false;
     this.either.clear();
+    this.jeErased.clear();
     this.exitedIndex = undefined;
     this.cursor = { ...this.session.snapshot().cursor };
   }
@@ -185,7 +187,7 @@ export class TerminalController {
   }
 
   private env(snap: ScreenSnapshot): EditEnv {
-    return { cols: snap.cols, rows: snap.rows, insertMode: this.insertMode, sbcsOnly: this.sbcsOnly, eitherMemory: this.either };
+    return { cols: snap.cols, rows: snap.rows, insertMode: this.insertMode, sbcsOnly: this.sbcsOnly, eitherMemory: this.either, jeErased: this.jeErased };
   }
 
   /** 編集の結果を反映する。値を `setField` へ渡し、カーソルを置く。成功なら true */
