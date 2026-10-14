@@ -202,6 +202,7 @@ export class TerminalController {
       this.local--;
     }
     this.cursor = r.cursor;
+    if (r.note) this.note = r.note;
     return true;
   }
 

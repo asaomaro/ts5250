@@ -19,12 +19,14 @@ import {
   toCells, fromCells, cellOfEntry, entryOfCell, overwrite as oOverwrite, insert as oInsert,
   del as oDel, backspace as oBackspace, eraseToEnd as oEraseToEnd, type OResult, type OCell
 } from "@ts5250/tn5250/edit/oFieldCells";
+import { chainInsert, chainOverwrite, chainDelete, chainBackspace, type ChainPos, type ChainResult } from "@ts5250/tn5250/edit/oChainCells";
+import { splitLead, SPLIT_TAIL } from "@ts5250/tn5250/browser";
 import { isFullWidth } from "@ts5250/base";
 
 export const MSG_NO_ROOM = "挿入する余地がありません";
 export const MSG_PROTECTED = "カーソルが保護された区域にあるため入力できません";
 export const MSG_SHIFT_POSITION = "この位置（全角の区切り）では操作できません";
-export const MSG_UNSUPPORTED = "この種類の欄の編集は未対応です（J・E・G・継続した O 欄）";
+export const MSG_UNSUPPORTED = "この種類の欄の編集は未対応です（J・E・G・継続した語送り欄）";
 export const MSG_FIELD_EXIT_KEY = "この項目は最終桁まで入力されています（Field Exit か Tab で項目を出てください）";
 
 /** 欄に打てない理由の表示（web-ui の `MSG_BY_REASON` と同じ文言） */
@@ -48,7 +50,7 @@ export interface EditEnv {
 
 /** 編集 1 回の結果。`value` を `setField` へ渡し、カーソルを `cursor` へ置く。`note` は操作員への一言 */
 export type EditOutcome =
-  | { ok: true; value: string; cursor: { row: number; col: number }; filled?: boolean; also?: { index: number; value: string }[] }
+  | { ok: true; value: string; cursor: { row: number; col: number }; filled?: boolean; also?: { index: number; value: string }[]; note?: string }
   | { ok: false; note?: string };
 
 const fail = (note?: string): EditOutcome => (note === undefined ? { ok: false } : { ok: false, note });
@@ -56,8 +58,8 @@ const fail = (note?: string): EditOutcome => (note === undefined ? { ok: false }
 /** 端末版が編集できる欄か */
 export function editable(f: Field): boolean {
   if (f.dbcsType === undefined) return !(f.continued !== undefined && f.wordWrap === true);
-  // O 欄: 継続した鎖と語送りは未対応（鎖の編集は oChainCells が要る）
-  return f.dbcsType === "open" && f.continued === undefined && f.wordWrap !== true;
+  // O 欄: 語送りは未対応（継続した鎖は oChainCells で編集する）
+  return f.dbcsType === "open" && f.wordWrap !== true;
 }
 
 const isOpen = (f: Field): boolean => f.dbcsType === "open";
@@ -67,6 +69,9 @@ const isWrap = (f: Field): boolean => f.wordWrap === true && f.dbcsType === unde
 
 /** 継続した（EDTMSK の）SBCS 欄か。区間の並びを 1 つの欄として編集する */
 const isContinued = (f: Field): boolean => f.continued !== undefined && f.dbcsType === undefined;
+
+/** 継続した O 欄（鎖）か */
+const isOChain = (f: Field): boolean => f.continued !== undefined && f.dbcsType === "open";
 
 /** MONOCASE 欄は 1 バイト文字を大文字にする（web-ui の `inputChar`。µ と全角は変えない） */
 function inputChar(ch: string, f: Field, env: EditEnv): string {
@@ -90,7 +95,12 @@ function openValue(f: Field, snap: ScreenSnapshot): string {
   for (let i = 0; i < f.length; i++) {
     const cell = row[f.col - 1 + i];
     if (!cell) continue;
-    if (cell.kind === "sbcs" && cell.char === " " && cell.rawByte === undefined) s += "\u0000";
+    const chain = f.continued !== undefined;
+    if (chain && cell.dead === true) s += DEAD_MARK;
+    // 鎖: 区間の最後の桁の全角の前半・区間の頭の後半は、区間の間で割れた全角の半分
+    else if (chain && cell.kind === "dbcs-lead" && i === f.length - 1) s += splitLead(cell.char) ?? cell.char;
+    else if (chain && cell.kind === "dbcs-tail" && i === 0) s += SPLIT_TAIL;
+    else if (cell.kind === "sbcs" && cell.char === " " && cell.rawByte === undefined) s += "\u0000";
     else if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
     else if (cell.kind === "so") s += SO_MARK;
     else if (cell.kind === "si") s += SI_MARK;
@@ -220,6 +230,25 @@ function acrossRun(
   return { ok: true, value: slice(g.at), cursor, also, merged: res.cursor };
 }
 
+/** 継続した O 欄の操作を鎖全体で行い、区間ごとの値へ割り戻す（web-ui `oChainApply`・`oChainCommit`） */
+function chainOp(
+  f: Field, snap: ScreenSnapshot, pos: { row: number; col: number }, env: EditEnv,
+  op: (segs: OCell[][], at: ChainPos) => ChainResult
+): EditOutcome {
+  const off = offsetAt(f, pos, env);
+  if (off === undefined) return fail();
+  const g = runGeom(f, snap, env);
+  const segs = g.run.map((x, k) => toCells([...openValue(x, snap)], g.lens[k]!));
+  const r = op(segs, { seg: g.at, c: off });
+  if ("error" in r) return fail(r.error === 0x12 ? MSG_NO_ROOM : r.error === 0x05 ? MSG_PROTECTED : MSG_SHIFT_POSITION);
+  if ("noop" in r) return fail();
+  const values = r.segs.map((cells) => fromCells(cells).join("").replace(/\u0000+$/, ""));
+  const target = g.run[r.cursor.seg]!;
+  const also = g.run.flatMap((x, k) => (x.index === f.index ? [] : [{ index: x.index, value: values[k]! }]));
+  const cursor = posOfOffset(target, Math.min(r.cursor.c, g.lens[r.cursor.seg]!), env.cols, env.rows);
+  return { ok: true, value: values[g.at]!, cursor, also, ...(r.warn !== undefined ? { note: MSG_SHIFT_POSITION } : {}) };
+}
+
 /** 1 文字を打つ */
 export function typeInto(f: Field, snap: ScreenSnapshot, pos: { row: number; col: number }, raw: string, env: EditEnv): EditOutcome {
   if (!editable(f)) return fail(MSG_UNSUPPORTED);
@@ -243,6 +272,7 @@ export function typeInto(f: Field, snap: ScreenSnapshot, pos: { row: number; col
     const { merged, ...out } = r;
     return merged !== undefined && merged >= total ? { ...out, filled: true } : out;
   }
+  if (isOChain(f)) return chainOp(f, snap, pos, env, (segs, at) => (env.insertMode ? chainInsert(segs, at, ch) : chainOverwrite(segs, at, ch)));
   const st = stateOf(f, snap, off, env);
 
   if (isOpen(f)) {
@@ -266,6 +296,7 @@ export function deleteAt(f: Field, snap: ScreenSnapshot, pos: { row: number; col
   const off = offsetAt(f, pos, env);
   if (off === undefined) return fail();
   if (isContinued(f)) return acrossRun(f, snap, pos, env, del, false);
+  if (isOChain(f)) return chainOp(f, snap, pos, env, (segs, at) => chainDelete(segs, at));
   const st = stateOf(f, snap, off, env);
   if (isOpen(f)) {
     const r = oApply(f, st, env, (cells, c) => oDel(cells, c));
@@ -285,6 +316,7 @@ export function backspaceAt(f: Field, snap: ScreenSnapshot, pos: { row: number; 
     if (g.offsets[g.at]! + off === 0) return fail(MSG_PROTECTED);
     return acrossRun(f, snap, pos, env, backspace, false);
   }
+  if (isOChain(f)) return chainOp(f, snap, pos, env, (segs, at) => chainBackspace(segs, at));
   if (off === 0) return fail();
   const st = stateOf(f, snap, off, env);
   if (isOpen(f)) {
@@ -303,7 +335,11 @@ export function exitAt(f: Field, snap: ScreenSnapshot, pos: { row: number; col: 
   if (isOpen(f)) {
     const span = fieldSpan(f, env.cols, env.rows);
     const cells = oEraseToEnd(toCells(st.chars, span), cellOfEntry(st.chars, st.cursor));
-    return finish(f, { ...st, chars: fromCells(cells), cursor: st.cursor }, env);
+    const done = finish(f, { ...st, chars: fromCells(cells), cursor: st.cursor }, env);
+    if (!done.ok || !isOChain(f)) return done;
+    // 続く区間は全桁を空きにする（web-ui `fillFollowingSegments`）
+    const g = runGeom(f, snap, env);
+    return { ...done, also: g.run.slice(g.at + 1).map((x) => ({ index: x.index, value: "" })) };
   }
   const done = finish(f, fieldExit(st, f), env);
   if (!done.ok || !isContinued(f)) return done;

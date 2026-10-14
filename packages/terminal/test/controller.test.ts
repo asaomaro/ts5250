@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { TerminalController, KeyDecoder, type SessionLike } from "../src/index.js";
 import { sessionFrom } from "./helpers.js";
+import { overlayField } from "../src/app/overlay.js";
 import { MSG_BY_REASON, MSG_NO_ROOM } from "../src/app/editing.js";
 import type { Field } from "@ts5250/tn5250";
 import type { KeyEvent } from "../src/index.js";
@@ -261,6 +262,33 @@ describe("TerminalController の継続欄・語送り欄（第 4 段）", () => 
     c.cursor = { row: 5, col: 80 };
     await press(c, "e");
     expect(fields[0].value).toBe(`ab ${DEAD_MARK}${DEAD_MARK}${DEAD_MARK}cde`);
+    expect(c.note).toBe("");
+  });
+});
+
+describe("TerminalController の継続した O 欄（鎖）", () => {
+  it("全角を打つと区間の終わりで次の区間へ送る（実機は未確認。偽のセッション）", async () => {
+    const real = await sessionFrom("pub400-signon-to-menu");
+    let snap = real.snapshot();
+    const proto = snap.fields.find((f) => !f.protected)!;
+    const mk = (index: number, col: number, cont: "first" | "last"): Field =>
+      ({ ...proto, index, row: 5, col, length: 4, dbcsType: "open", continued: cont, value: "" });
+    snap = { ...snap, fields: [mk(90, 10, "first"), mk(91, 20, "last")] };
+    const sess: SessionLike = {
+      snapshot: () => snap,
+      sendAid: async () => undefined,
+      setField: (t, v) => {
+        const f = snap.fields.find((x) => x.index === t.index)!;
+        snap = overlayField(snap, f, v);
+      },
+      dismissHostError: () => false,
+      disconnect: () => undefined
+    };
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 10 };
+    await press(c, "日本");
+    const second = snap.fields.find((f) => f.index === 91)!.value;
+    expect([...second].some((ch) => ch === "本")).toBe(true);
     expect(c.note).toBe("");
   });
 });

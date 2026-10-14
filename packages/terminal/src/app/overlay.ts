@@ -5,6 +5,7 @@
  * 端末側は編集中の値を手元で持ち、描画と次の編集の入力には「重ねた画面」を使う。
  * `Session5250.setField` が内部バッファへすることと同じ見え方を、スナップショット上で作る。
  */
+import { isSplitLead, splitLeadChar, isSplitTail } from "@ts5250/tn5250/browser";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import { fieldSlices } from "@ts5250/tn5250/edit/fieldSlices";
 import { SO_MARK, SI_MARK, isDeadMark, isWideForDbcs } from "@ts5250/tn5250/edit/fieldValidate";
@@ -22,7 +23,11 @@ function toCells(value: string, proto: Cell, width: number): Cell[] {
   for (const ch of value) {
     if (ch === SO_MARK) out.push(mk("so", " "));
     else if (ch === SI_MARK) out.push(mk("si", " "));
-    else if (ch === "\u0000" || isDeadMark(ch)) out.push(mk("sbcs", " "));
+    else if (isDeadMark(ch)) out.push({ ...mk("sbcs", " "), dead: true });
+    else if (ch === "\u0000") out.push(mk("sbcs", " "));
+    // 継続した O 欄の、区間の間で割れた全角の半分
+    else if (isSplitLead(ch)) out.push(mk("dbcs-lead", splitLeadChar(ch)));
+    else if (isSplitTail(ch)) out.push(mk("dbcs-tail", " "));
     else if (isWideForDbcs(ch)) out.push(mk("dbcs-lead", ch), mk("dbcs-tail", " "));
     else out.push(mk("sbcs", ch));
   }

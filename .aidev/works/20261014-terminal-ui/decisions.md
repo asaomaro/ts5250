@@ -22,7 +22,8 @@
 ## 第 5 段（継続欄・語送り欄。利用者の指示「第 4 段を進めて」2026-10-14）
 - D17: 継続した（EDTMSK の）SBCS 欄は、区間の並びを合成バッファへつないで `fieldEdit` の純関数を掛け、区間ごとに割り戻す（web-ui `editAcrossContinued` と同じ手順）。編集結果は `EditOutcome.also` で他の区間の値を運び、controller が `setField` する。Tab の停止点は並びの先頭区間だけ（`isTabStopField`）。
 - D18: 語送り欄は空きを NUL で持ち、打鍵・Delete・Backspace のあとに `wordWrap` を掛ける。送る値は末尾の NUL を落とし、途中の NUL は `DEAD_MARK`（core が運ぶセンチネル）。`overlayField` は `DEAD_MARK` を空白の桁として描く。
-- D19: 継続した語送り欄・継続した O 欄（鎖）・J/E/G は引き続き「未対応」と知らせて値を変えない。O 鎖は `oChainCells` の純関数があるので次の候補。
+- D19: 継続した語送り欄・J/E/G は引き続き「未対応」と知らせて値を変えない。
+- D20: 継続した O 欄（鎖）は `oChainCells` の `chain*` を呼び、区間ごとのセルへ展開して割り戻す（web-ui `oChainApply` と同じ分担）。死んだ桁は `DEAD_MARK`、割れた全角は `splitLead`/`SPLIT_TAIL` で値に持ち、`overlayField` が同じ印をセルへ戻す。実機は未確認（偽のセッション）。
 
 ## 未確認（第 5 段）
 - 継続欄・語送り欄とも偽のセッション（記録の画面の欄を書き換えたもの）でだけ確認した。実機（EDTMSK・WRDWRAP の画面）では未確認。
