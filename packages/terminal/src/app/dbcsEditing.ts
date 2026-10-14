@@ -10,7 +10,7 @@
  * - J: SO・全角の字・空き（NUL の組）・SI。空き 2 桁ごとに全角 1 字。半角の空白は全角空白にして打つ（ACS の `convertSBCSCharToDBCS`）
  * - G: SO/SI なし。全角空白で詰める
  * - E: 最初の字で半角か全角かが決まり、混ぜられない。全角の状態は J と同じ並び（SI が最後の桁の `full`、中身の直後の `compact`）
- * 未対応（値を変えずに知らせる）: 複数の行にまたがる欄、SI の無い全角の E（`open`。ACS は消した後の組み直しが特殊）
+ * 未対応（値を変えずに知らせる）: 複数の行にまたがる欄
  */
 import type { Field, ScreenSnapshot } from "@ts5250/tn5250";
 import { posOfOffset, offsetOfPos } from "@ts5250/tn5250/edit/fieldSlices";
@@ -33,12 +33,14 @@ interface Model {
   wide: boolean;
   /** SO・SI の桁を持つか（G と半角の E は持たない） */
   shifted: boolean;
-  shape: "full" | "compact";
+  shape: "full" | "compact" | "open";
   /** 上書きで入れられる字数 */
   capOverwrite: number;
   /** 挿入で入れられる字数（compact の E は最後の桁を空きに数えない。ACS `reserveRoomForInsert`） */
   capInsert: number;
   eitherOn: boolean;
+  /** open の E が「中身を全部消したあと」の欄か */
+  erased?: boolean;
 }
 
 type Loaded = { ok: true; m: Model } | { ok: false; note: string };
@@ -93,10 +95,12 @@ function load(f: Field, snap: ScreenSnapshot, env: EditEnv): Loaded {
     const chars = trimNul(halfChars);
     return { ok: true, m: { chars, wide: false, shifted: false, shape: "full", capOverwrite: L, capInsert: L, eitherOn: false } };
   }
-  if (hasSo && siAt < 0 && wideChars.length > 0) return { ok: false, note: MSG_UNSUPPORTED_JEG };
-  const shape = hasSo && siAt >= 0 && siAt !== L - 1 ? "compact" : "full";
-  const capInsert = shape === "compact" ? Math.floor((L - 3) / 2) : full;
-  return { ok: true, m: { chars: wideChars, wide: true, shifted: true, shape, capOverwrite: full, capInsert, eitherOn: true } };
+  // SI の無い全角の E（open）: compact の E を中身の中から消したあとの形（ACS は SI を足さない）
+  const open = (hasSo && siAt < 0) || (wideChars.length === 0 && env.jeErased?.has(f.index) === true);
+  const shape = open ? "open" : hasSo && siAt >= 0 && siAt !== L - 1 ? "compact" : "full";
+  const capInsert = shape === "full" ? full : Math.floor((L - 3) / 2);
+  const erased = env.jeErased?.has(f.index) === true;
+  return { ok: true, m: { chars: wideChars, wide: true, shifted: true, shape, capOverwrite: full, capInsert, eitherOn: true, ...(erased ? { erased } : {}) } };
 }
 
 /** 論理の字の並び → `setField` へ渡す値（J・全角の E は SO…SI の印入り。空きは NUL の組） */
@@ -106,6 +110,8 @@ function compose(f: Field, m: Model): string {
   const body = m.chars.join("");
   if (!m.wide) return m.chars.map((c) => (c === NUL ? DEAD_MARK : c)).join("");
   if (!m.shifted) return body + WIDE_SPACE.repeat(Math.max(0, m.capOverwrite - n));
+  // SI の無い E: 消したあとの 2 字目以降は新しい `SO 字… SI` の組（実機の ACS）。それまでは SI を付けない
+  if (m.shape === "open") return m.erased === true && n >= 2 ? SO_MARK + m.chars[0] + SO_MARK + m.chars.slice(1).join("") + SI_MARK : SO_MARK + body;
   if (m.shape === "compact") return SO_MARK + body + SI_MARK;
   return SO_MARK + body + DEAD_MARK.repeat(Math.max(0, f.length - 2 - 2 * n)) + SI_MARK;
 }
@@ -204,6 +210,18 @@ export function jegExit(f: Field, snap: ScreenSnapshot, pos: { row: number; col:
   const s = setup(f, snap, pos, env);
   if (isOutcome(s)) return s;
   const { m, idx } = s;
+  const before = m.chars.length;
   m.chars.length = Math.min(idx, m.chars.length);
+  // 全角の E で SI が中身の直後（compact）なら、カーソルが SI より前の消去は SI も消す（ACS の 1 桁の内側の消去）
+  if (f.dbcsType === "either" && m.wide && m.shape === "compact" && idx <= before) {
+    m.shape = "open";
+    if (m.chars.length === 0) {
+      env.jeErased?.add(f.index);
+      env.eitherMemory?.set(f.index, true);
+      m.erased = true;
+    }
+  } else if (f.dbcsType === "either" && m.wide && m.chars.length === 0) {
+    env.eitherMemory?.set(f.index, true);
+  }
   return done(f, m, idx, env);
 }

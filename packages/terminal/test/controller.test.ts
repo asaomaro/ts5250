@@ -382,4 +382,17 @@ describe("TerminalController の J・E・G 欄（第 6 段）", () => {
     expect(c.note).toBe("");
     expect(writes.at(-1)).toBe(`${SO_MARK}うあい\u3000\u3000${SI_MARK}`);
   });
+
+  it("E: 全部消しても、SI が最後の桁の E（full）は形を保つ", async () => {
+    const { sess, writes } = await fakeJeg("either", 12);
+    const c = new TerminalController(sess, { sbcsOnly: false });
+    c.cursor = { row: 5, col: 10 };
+    await press(c, "あ");
+    c.cursor = { row: 5, col: 11 };
+    await press(c, "\x1de");
+    expect(writes.at(-1)).toBe("");
+    c.cursor = { row: 5, col: 11 };
+    await press(c, "い");
+    expect(writes.at(-1)).toBe(`${SO_MARK}い${DEAD_MARK.repeat(8)}${SI_MARK}`);
+  });
 });

@@ -12,6 +12,6 @@ ts5250-term --replay packages/tn5250/test/fixtures/pub400-jobinfo.jsonl   # ホ�
 Field Exit・型の検査・O 欄の SO/SI 補完）。規則は web-ui と同じ `@ts5250/tn5250/edit/*` を呼ぶ。
 第 4 段で継続欄（EDTMSK の区間の並び。1 つの欄として挿入・Delete・Backspace・Field Exit）・語送り欄・継続した O 欄（鎖）を足した。
 第 6 段で J／E／G 欄（1 行に収まるもの。半角の空白は全角空白、E は最初の字で半角・全角が決まる）を足した。
-**未対応**: 複数行にまたがる J／E／G・SI の無い全角の E・継続した J／E／G・継続した語送り欄・Field＋／Field−（欄に打とうとすると「未対応」と知らせて値を変えない）。
+**未対応**: 複数行にまたがる J／E／G・継続した J／E／G・継続した語送り欄・Field＋／Field−（欄に打とうとすると「未対応」と知らせて値を変えない）。
 挿入は Insert キーまたは接頭キーの `i`。AID の送信で上書きへ戻る。
 経緯と実測は `.aidev/works/20261014-terminal-ui/`。下線・桁区切りは画面定義（DDS）に従い、代替の見せ方は足さない。

@@ -49,6 +49,8 @@ export interface EditEnv {
   sbcsOnly: boolean;
   /** E 欄の全角・半角の状態を、空にしても保つ記憶（欄の番号 → 全角か。AID の送信で捨てる） */
   eitherMemory?: Map<number, boolean>;
+  /** 全部消した open の E の欄の番号（AID の送信で捨てる） */
+  jeErased?: Set<number>;
 }
 
 /** 編集 1 回の結果。`value` を `setField` へ渡し、カーソルを `cursor` へ置く。`note` は操作員への一言 */
