@@ -1,0 +1,27 @@
+{
+  "name": "@ts5250/terminal",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "Character-terminal front end for 5250 — renders a ScreenSnapshot as ANSI, decodes keys into AIDs and field input. Connection and screen model come from @ts5250/tn5250.",
+  "type": "module",
+  "bin": {
+    "ts5250-term": "./dist/transport/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@ts5250/base": "0.1.0",
+    "@ts5250/tn5250": "0.1.0"
+  }
+}

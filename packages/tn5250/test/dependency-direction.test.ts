@@ -36,7 +36,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const PACKAGES = join(here, "..", "..");
 
 /** 下ほど上位。上位は下位を import してよいが、逆はしてはならない */
-const LAYERS = ["base", "ebcdic", "scs", "hostserver", "tn5250", "tn3270", "vt"] as const;
+const LAYERS = ["base", "ebcdic", "scs", "hostserver", "tn5250", "tn3270", "vt", "terminal"] as const;
 
 /** 互いに依存してはならない対（同位のパッケージ） */
 const SIBLINGS: readonly (readonly [string, string])[] = [
@@ -49,7 +49,13 @@ const SIBLINGS: readonly (readonly [string, string])[] = [
   ["vt", "tn5250"],
   ["vt", "tn3270"],
   ["vt", "scs"],
-  ["vt", "ebcdic"]
+  ["vt", "ebcdic"],
+  // terminal は 5250 の文字端末の前面。tn5250 と base だけを使う（ホストサーバー・他の端末種別・EBCDIC・SCS には触れない）
+  ["terminal", "hostserver"],
+  ["terminal", "tn3270"],
+  ["terminal", "vt"],
+  ["terminal", "scs"],
+  ["terminal", "ebcdic"]
 ];
 
 function collect(dir: string): string[] {

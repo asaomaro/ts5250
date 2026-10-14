@@ -23,6 +23,9 @@
       "path": "packages/vt"
     },
     {
+      "path": "packages/terminal"
+    },
+    {
       "path": "packages/server"
     },
     {
