@@ -10,6 +10,7 @@
  *   点線の下線（SGR 4:4）。端末側で代替の見せ方（縞・中点埋め）は足さない（利用者の判断）。
  */
 import type { Cell, ScreenColor, ScreenSnapshot } from "@ts5250/tn5250";
+import { gridOverlay, type GridCell } from "./grid.js";
 
 export type ColorMode = "truecolor" | "256";
 
@@ -74,11 +75,19 @@ function glyphOf(c: Cell): string {
 const isAscii = (ch: string): boolean => ch.charCodeAt(0) < 0x7f && ch >= " ";
 
 /** 画面 1 行を描く。`x0` は端末上の左端（1 始まり）、`maxCols` まで（超えた分は切る） */
-function rowOf(cells: readonly Cell[], termRow: number, maxCols: number, mode: ColorMode): string {
+function rowOf(cells: readonly Cell[], termRow: number, maxCols: number, mode: ColorMode, grid?: Map<number, GridCell>): string {
   let out = `\x1b[${termRow};1H`;
   let last = "";
   let col = 1;
-  for (const c of cells) {
+  let cellNo = 0;
+  for (const src of cells) {
+    cellNo++;
+    let c = src;
+    // DDS の罫線は、文字の無いセルにだけ罫線文字で描く（文字のあるセルは文字を優先）
+    const g = grid?.get(termRow * 1000 + cellNo);
+    if (g && (c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay) {
+      c = { ...c, kind: "sbcs", char: g.ch, color: g.color, reverse: false, underline: false, columnSeparator: false };
+    }
     // 右半分は lead が 2 桁ぶん進めてあるので、ここでは進めない（二重に数えると以降の桁が全角 1 字ごとに 1 桁ずれる）
     if (c.kind === "dbcs-tail") continue;
     const w = c.kind === "dbcs-lead" ? 2 : 1;
@@ -112,7 +121,8 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
   const { cols, rows } = opts.viewport;
   const screenRows = Math.max(0, Math.min(snap.rows, rows - 1));
   const out: string[] = [];
-  for (let r = 0; r < screenRows; r++) out.push(rowOf(snap.cells[r]!, r + 1, cols, opts.colorMode));
+  const grid = gridOverlay(snap);
+  for (let r = 0; r < screenRows; r++) out.push(rowOf(snap.cells[r]!, r + 1, cols, opts.colorMode, grid));
   const cursor = opts.cursor ?? snap.cursor;
   if (rows >= 1) {
     const small = cols < snap.cols || rows < snap.rows + 1 ? `端末が小さい（${snap.cols}x${snap.rows + 1} が要る）` : undefined;
