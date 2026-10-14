@@ -83,10 +83,11 @@ function rowOf(cells: readonly Cell[], termRow: number, maxCols: number, mode: C
   for (const src of cells) {
     cellNo++;
     let c = src;
-    // DDS の罫線は、文字の無いセルにだけ罫線文字で描く（文字のあるセルは文字を優先）
+    // DDS の罫線は、文字の無いセルにだけ罫線文字で描く（文字のあるセルは文字を優先）。窓の枠・見出しは背面の上に乗るので上書きする
     const g = grid?.get(termRow * 1000 + cellNo);
-    if (g && (c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay) {
-      c = { ...c, kind: "sbcs", char: g.ch, color: g.color, reverse: false, underline: false, columnSeparator: false };
+    if (g && (g.force === true || ((c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay))) {
+      const kind = g.half === "lead" ? "dbcs-lead" : g.half === "tail" ? "dbcs-tail" : "sbcs";
+      c = { ...c, kind, char: g.ch, color: g.color, reverse: g.reverse === true, underline: false, columnSeparator: false, nonDisplay: false };
     }
     // 右半分は lead が 2 桁ぶん進めてあるので、ここでは進めない（二重に数えると以降の桁が全角 1 字ごとに 1 桁ずれる）
     if (c.kind === "dbcs-tail") continue;

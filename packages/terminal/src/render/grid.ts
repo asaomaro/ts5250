@@ -10,8 +10,10 @@
  * 色と線種は ACS に合わせず、ホストの指定どおりにする（`gridSegments` の注記。利用者の判断）。
  * 端末が出せない線種は近い字へ寄せる: 太字・二重・点線・破線は専用の字、二重破線は二重線。
  */
-import type { GuiGridLine, ScreenColor, ScreenSnapshot } from "@ts5250/tn5250";
+import type { GuiGridLine, GuiWindow, ScreenColor, ScreenSnapshot } from "@ts5250/tn5250";
 import { GRID_COLOR } from "@ts5250/tn5250";
+import { decodeAttribute } from "@ts5250/tn5250/browser";
+import { isFullWidth } from "@ts5250/base";
 
 const N = 1, E = 2, S = 4, W = 8;
 
@@ -44,12 +46,19 @@ function glyph(mask: number, style: Style): string {
 export interface GridCell {
   ch: string;
   color: ScreenColor;
+  /** 反転（反転表示の空白で枠を描く窓。`WDWBORDER` の `DSPATR(RI)`） */
+  reverse?: boolean;
+  /** 窓の枠・見出し。文字のあるセルも上書きする（窓は背面の上に乗る） */
+  force?: boolean;
+  /** 全角の字の左半分／右半分 */
+  half?: "lead" | "tail";
 }
 
 /** 罫線の置き場。キーは `row * 1000 + col`（1 始まり）。空なら `undefined` */
 export function gridOverlay(snap: ScreenSnapshot): Map<number, GridCell> | undefined {
-  const lines = snap.gui?.gridLines;
-  if (!lines || lines.length === 0) return undefined;
+  const lines = snap.gui?.gridLines ?? [];
+  const windows = snap.gui?.windows ?? [];
+  if (lines.length === 0 && windows.length === 0) return undefined;
   const acc = new Map<number, { mask: number; style: Style; color: ScreenColor }>();
   const add = (row: number, col: number, bits: number, style: Style, color: ScreenColor): void => {
     if (row < 1 || col < 1 || row > snap.rows || col > snap.cols) return;
@@ -60,7 +69,8 @@ export function gridOverlay(snap: ScreenSnapshot): Map<number, GridCell> | undef
   for (const g of lines) segmentsOf(g, add);
   const out = new Map<number, GridCell>();
   for (const [k, v] of acc) out.set(k, { ch: glyph(v.mask, v.style), color: v.color });
-  return out;
+  for (const w of windows) windowCells(w, snap, out);
+  return out.size > 0 ? out : undefined;
 }
 
 type Add = (row: number, col: number, bits: number, style: Style, color: ScreenColor) => void;
@@ -131,5 +141,60 @@ function segmentsOf(g: GuiGridLine, add: Add): void {
   }
   if ((g.minorType === 0x06 || g.minorType === 0x07) && g.value2 > 0) {
     for (let b = left + g.value2; b < right; b += g.value2) vAt(b, true);
+  }
+}
+
+/** ScreenColor に落とす（属性バイトのデコード結果は同じ名前の色） */
+const asColor = (c: string): ScreenColor => (["green", "white", "red", "turquoise", "yellow", "pink", "blue"] as const).find((x) => x === c) ?? "green";
+
+/**
+ * 窓の枠（WDWBORDER）と見出し（WDWTITLE）。**枠は窓の外側**で、行 `row`〜`row+height+1`・桁 `col+1`〜`col+width+4`
+ * （ホストが送る位置は枠の左上で、属性の桁を 1 つ含む。web-ui `hostBorderRows`・`hostBorderSegments` と同じ）。
+ * 文字の指定があれば**属性ごと**その字で描く（反転の空白 8 個なら背景色のセルの枠）。無ければ線の枠にする。
+ * 窓は背面の上に乗るので、枠も見出しも下の文字を上書きする。
+ */
+function windowCells(w: GuiWindow, snap: ScreenSnapshot, out: Map<number, GridCell>): void {
+  const put = (row: number, col: number, c: GridCell): void => {
+    if (row < 1 || col < 1 || row > snap.rows || col > snap.cols) return;
+    out.set(row * 1000 + col, { ...c, force: true });
+  };
+  const bottom = w.row + w.height + 1;
+  const left = w.col + 1;
+  const right = w.col + w.width + 4;
+  const b = w.border;
+  if (b) {
+    const a = decodeAttribute(b.cba);
+    const base = { color: asColor(a.color), ...(a.reverse ? { reverse: true } : {}) };
+    const c = b.chars;
+    for (let col = left; col <= right; col++) {
+      const first = col === left, last = col === right;
+      put(w.row, col, { ...base, ch: c ? (first ? c.ulbc : last ? c.urbc : c.tbc) : first ? "┌" : last ? "┐" : "─" });
+      put(bottom, col, { ...base, ch: c ? (first ? c.llbc : last ? c.lrbc : c.bbc) : first ? "└" : last ? "┘" : "─" });
+    }
+    for (let row = w.row + 1; row < bottom; row++) {
+      put(row, left, { ...base, ch: c ? c.lbc : "│" });
+      put(row, right, { ...base, ch: c ? c.rbc : "│" });
+    }
+  }
+  const t = w.title;
+  if (t) {
+    const cells = w.width + 4;
+    const row = t.footer ? bottom : w.row;
+    const width = [...t.text].reduce((n, ch) => n + (isFullWidth(ch) ? 2 : 1), 0);
+    const pad = Math.max(0, cells - width);
+    const off = t.align === "left" ? 0 : t.align === "right" ? pad : Math.floor(pad / 2);
+    const a = decodeAttribute(t.cba);
+    const base = { color: asColor(a.color), ...(a.reverse ? { reverse: true } : {}) };
+    let col = w.col + off + 1;
+    for (const ch of t.text) {
+      if (isFullWidth(ch)) {
+        put(row, col, { ...base, ch, half: "lead" });
+        put(row, col + 1, { ...base, ch: "", half: "tail" });
+        col += 2;
+      } else {
+        put(row, col, { ...base, ch });
+        col += 1;
+      }
+    }
   }
 }
