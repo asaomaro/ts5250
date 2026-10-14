@@ -7,7 +7,7 @@
  * 資格情報は引数に出さない: パスワードは環境変数名を指す（`--password-env`、既定 `AS400_PASSWORD`）。
  */
 import { readFileSync } from "node:fs";
-import { Session5250, ReplayTransport, parseTraceJsonl } from "@ts5250/tn5250";
+import { Session5250, ReplayTransport, parseTraceJsonl, isDbcsCcsid } from "@ts5250/tn5250";
 import { renderFrame, paintDiff, type ColorMode } from "../render/frame.js";
 import { KeyDecoder } from "../input/decode.js";
 import { TerminalController, PREFIX_DEFAULT } from "../app/controller.js";
@@ -16,8 +16,8 @@ const USAGE = `使い方: ts5250-term --host <ホスト> [--port N] [--tls] [--c
                     [--user U] [--password-env 環境変数名] [--device 装置名] [--prefix 文字]
       ts5250-term --replay <記録.jsonl> [--ccsid N]   （記録の再生。ホスト不要。画面確認・試験用）
   操作: 矢印=移動 Tab/Shift+Tab=欄移動 Enter・F1〜F12・Shift+F1〜F12(=F13〜F24)・PageUp/Down=AID
-        Esc=リセット  Ctrl+${PREFIX_DEFAULT} の次: a=Attn s=SysReq h=Help p=Print c=Clear r=Reset e=FieldExit 1-3=PA q=終了
-  第 1 段: SBCS の上書き入力のみ（挿入・全角・DBCS 欄の入力は未対応）`;
+        Esc=リセット  Ctrl+${PREFIX_DEFAULT} の次: a=Attn s=SysReq h=Help p=Print c=Clear r=Reset e=FieldExit i=挿入 1-3=PA q=終了
+  編集: 文字欄と O 欄（SO/SI 補完）。Insert または接頭キーの i で挿入。継続・語送り・J・E・G 欄は未対応`;
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
     warn: () => {}
   });
 
-  const ctl = new TerminalController(session, { prefix: arg("prefix") ?? PREFIX_DEFAULT });
+  const ctl = new TerminalController(session, { prefix: arg("prefix") ?? PREFIX_DEFAULT, sbcsOnly: !isDbcsCcsid(session.ccsid) });
   const decoder = new KeyDecoder();
   const mode = colorMode();
   let prev: string[] | undefined;
@@ -78,7 +78,8 @@ async function main(): Promise<void> {
       viewport: { cols: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 25 },
       colorMode: mode,
       note: ctl.note,
-      cursor: ctl.cursor
+      cursor: ctl.cursor,
+      insert: ctl.insertMode
     });
     out(paintDiff(full ? undefined : prev, f));
     prev = f.rows;

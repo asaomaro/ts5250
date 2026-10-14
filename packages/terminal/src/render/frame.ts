@@ -21,6 +21,8 @@ export interface FrameOptions {
   note?: string;
   /** カーソルの位置（1 始まり）。省略時はホストの指定 */
   cursor?: { row: number; col: number };
+  /** 挿入モード（状態行に出す） */
+  insert?: boolean;
 }
 
 export interface Frame {
@@ -94,11 +96,12 @@ function rowOf(cells: readonly Cell[], termRow: number, maxCols: number, mode: C
 }
 
 /** 状態行。ACS のオペレーター情報域に当たる（入力禁止・メッセージ待ち・カーソル位置） */
-function statusOf(snap: ScreenSnapshot, cursor: { row: number; col: number }, note: string | undefined): string {
+function statusOf(snap: ScreenSnapshot, cursor: { row: number; col: number }, note: string | undefined, insert: boolean): string {
   const parts = [
     snap.keyboardLocked ? "入力禁止" : "入力可",
     snap.messageWaiting ? "メッセージ待ち" : "",
     snap.sysReqLine ? "SysReq" : "",
+    insert ? "挿入" : "",
     `${String(cursor.row).padStart(2, "0")}/${String(cursor.col).padStart(3, "0")}`,
     snap.systemMessage ?? note ?? ""
   ].filter((s) => s !== "");
@@ -113,7 +116,7 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
   const cursor = opts.cursor ?? snap.cursor;
   if (rows >= 1) {
     const small = cols < snap.cols || rows < snap.rows + 1 ? `端末が小さい（${snap.cols}x${snap.rows + 1} が要る）` : undefined;
-    const text = statusOf(snap, cursor, small ?? opts.note);
+    const text = statusOf(snap, cursor, small ?? opts.note, opts.insert === true);
     // 状態行は端末の最終行。切り詰めは文字数で行う（全角は 2 桁数える）
     let w = 0;
     let s = "";

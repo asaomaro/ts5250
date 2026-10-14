@@ -8,6 +8,8 @@ ts5250-term --host <ホスト> [--tls] [--ccsid 1399] [--user U --password-env A
 ts5250-term --replay packages/tn5250/test/fixtures/pub400-jobinfo.jsonl   # ホスト不要
 ```
 
-第 1 段（現状）: 描画・AID 送信・フィールド移動・**SBCS の上書き入力のみ**。挿入・全角／DBCS 欄の入力・
-Field Exit の整形・検証は、編集ロジックを web-ui から切り出す第 2 段で入れる。
+現状（第 3 段）: 描画・AID 送信・フィールド移動に加え、文字欄と O 欄の編集（挿入／上書き・Delete・Backspace・
+Field Exit・型の検査・O 欄の SO/SI 補完）。規則は web-ui と同じ `@ts5250/tn5250/edit/*` を呼ぶ。
+**未対応**: 継続欄・語送り欄・J／E／G 欄・Field＋／Field−（欄に打とうとすると「未対応」と知らせて値を変えない）。
+挿入は Insert キーまたは接頭キーの `i`。AID の送信で上書きへ戻る。
 経緯と実測は `.aidev/works/20261014-terminal-ui/`。下線・桁区切りは画面定義（DDS）に従い、代替の見せ方は足さない。

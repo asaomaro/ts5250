@@ -1,15 +1,16 @@
 /**
  * キー事象 → 5250 の操作。**純ロジック**（セッションは構造的な型 `SessionLike` で受ける＝試験は偽物で足りる）。
  *
- * 第 1 段の範囲（`.aidev/works/20261014-terminal-ui`）: カーソル移動・フィールド移動・AID 送信・
- * **SBCS の上書き入力だけ**。挿入モード・DBCS の SO/SI 補完・Field Exit の整形・検証は第 2 段
- * （編集ロジックを web-ui から切り出してから）。ここへ編集を写し直さない——web-ui と結果が食い違うため。
+ * カーソル移動・フィールド移動・AID 送信と、欄の編集（挿入／上書き・Delete・Backspace・Field Exit・型の検査・
+ * O 欄の SO/SI 補完）。**編集の規則は `editing.ts` が `@ts5250/tn5250/edit/*` を呼んで行う**——ここへ写し直さない
+ * （web-ui と結果が食い違うため。`.aidev/works/20261014-terminal-ui` decisions D7）。
  *
  * 5250 の専用キーは文字端末に無いものがある（research F9b）。**接頭キーの次の 1 文字**で割り当てる:
- *   a Attn / s SysReq / h Help / p Print / c Clear / r Reset / e Field Exit(簡易) / 1 2 3 PA1〜PA3 / q 終了
+ *   a Attn / s SysReq / h Help / p Print / c Clear / r Reset / e Field Exit / i 挿入切替 / 1 2 3 PA1〜PA3 / q 終了
  */
 import type { AidKey, Field, ScreenSnapshot, SendAidOptions } from "@ts5250/tn5250";
-import { isFullWidth } from "@ts5250/base";
+import { typeInto, deleteAt, backspaceAt, exitAt, MSG_FIELD_EXIT_KEY, type EditEnv, type EditOutcome } from "./editing.js";
+import { offsetOfPos } from "@ts5250/tn5250/edit/fieldSlices";
 import type { KeyEvent } from "../input/decode.js";
 
 export interface SessionLike {
@@ -23,6 +24,8 @@ export interface SessionLike {
 export interface ControllerOptions {
   /** 接頭キーの文字（Ctrl+この文字）。既定は `]`（tmux の Ctrl+B・screen の Ctrl+A と衝突しない） */
   prefix?: string;
+  /** DBCS の CCSID でないセッションか（幅の検査を SBCS 向けにする） */
+  sbcsOnly?: boolean;
 }
 
 export const PREFIX_DEFAULT = "]";
@@ -39,12 +42,18 @@ export class TerminalController {
   note = "";
   quit = false;
   private prefixed = false;
+  /** 挿入モード（Insert キーまたは接頭キーの `i` で切り替え。AID 送信後は上書きへ戻る——5250 の挿入は 1 入力ごと） */
+  insertMode = false;
+  /** 最終桁まで打って「出た」状態の欄の番号（次の文字はエラー。ACS の fieldExited） */
+  private exitedIndex: number | undefined;
+  private readonly sbcsOnly: boolean;
   /** 自分の `setField` が起こす screen 事象で、カーソルをホストの位置へ戻さないための印 */
   private local = 0;
   private readonly prefix: string;
 
   constructor(private readonly session: SessionLike, opts: ControllerOptions = {}) {
     this.prefix = opts.prefix ?? PREFIX_DEFAULT;
+    this.sbcsOnly = opts.sbcsOnly ?? true;
     this.cursor = { ...session.snapshot().cursor };
   }
 
@@ -57,6 +66,8 @@ export class TerminalController {
   async handle(ev: KeyEvent): Promise<void> {
     const snap = this.session.snapshot();
     this.note = "";
+    // 「出た」状態は、欄の外へ動く・別の操作をすると下りる。打鍵の分岐だけが見る
+    if (!(ev.kind === "char" && !ev.ctrl && !ev.alt)) this.exitedIndex = undefined;
     if (this.prefixed) {
       this.prefixed = false;
       if (ev.kind !== "char") return;
@@ -65,7 +76,7 @@ export class TerminalController {
     if (ev.kind === "char") {
       if (ev.ctrl && ev.ch === this.prefix) {
         this.prefixed = true;
-        this.note = `接頭キー: a=Attn s=SysReq h=Help p=Print c=Clear r=Reset e=FieldExit 1-3=PA q=終了`;
+        this.note = `接頭キー: a=Attn s=SysReq h=Help p=Print c=Clear r=Reset e=FieldExit i=挿入 1-3=PA q=終了`;
         return;
       }
       if (ev.ctrl && ev.ch === "c") {
@@ -86,7 +97,8 @@ export class TerminalController {
       case "Home": return this.toFirstField(snap);
       case "Escape": return this.reset(snap);
       case "Backspace": return this.backspace(snap);
-      case "Delete": return this.blank(snap, this.cursor.col);
+      case "Delete": return this.delete(snap);
+      case "Insert": this.insertMode = !this.insertMode; return;
       case "Enter": return this.aid("Enter", snap);
       case "PageUp": return this.aid("PageUp", snap);
       case "PageDown": return this.aid("PageDown", snap);
@@ -107,6 +119,10 @@ export class TerminalController {
     }
     if (ch === "r") return this.reset(snap);
     if (ch === "e") return this.fieldExit(snap);
+    if (ch === "i") {
+      this.insertMode = !this.insertMode;
+      return;
+    }
     const aid = PREFIXED[ch];
     if (aid) return this.aid(aid, snap);
     this.note = `接頭キーの割り当てが無い: ${ch}`;
@@ -122,7 +138,9 @@ export class TerminalController {
     } catch (e) {
       this.note = e instanceof Error ? e.message : String(e);
     }
-    // 送信後の画面はホストが決めたカーソルから始める
+    // 送信後の画面はホストが決めたカーソルから始める。挿入は 1 入力ごと（ACS）
+    this.insertMode = false;
+    this.exitedIndex = undefined;
     this.cursor = { ...this.session.snapshot().cursor };
   }
 
@@ -144,7 +162,7 @@ export class TerminalController {
   }
 
   private fieldAt(snap: ScreenSnapshot, p = this.cursor): Field | undefined {
-    return snap.fields.find((f) => !f.protected && f.row === p.row && p.col >= f.col && p.col < f.col + f.length);
+    return snap.fields.find((f) => !f.protected && offsetOfPos(f, p.row, p.col, snap.cols, snap.rows) !== undefined);
   }
 
   private toField(snap: ScreenSnapshot, dir: 1 | -1): void {
@@ -161,71 +179,76 @@ export class TerminalController {
     if (f) this.cursor = { row: f.row, col: f.col };
   }
 
-  /** 値を桁の並びとして取り出す（`value` は末尾の空白が落ちている） */
-  private chars(f: Field): string[] {
-    return [...f.value.padEnd(f.length, " ")].slice(0, f.length);
+  private env(snap: ScreenSnapshot): EditEnv {
+    return { cols: snap.cols, rows: snap.rows, insertMode: this.insertMode, sbcsOnly: this.sbcsOnly };
   }
 
-  private write(f: Field, chars: string[]): boolean {
+  /** 編集の結果を反映する。値を `setField` へ渡し、カーソルを置く。成功なら true */
+  private apply(f: Field, r: EditOutcome): boolean {
+    if (!r.ok) {
+      if (r.note) this.note = r.note;
+      return false;
+    }
     this.local++;
     try {
-      this.session.setField({ index: f.index }, chars.join("").replace(/ +$/, ""));
-      return true;
+      this.session.setField({ index: f.index }, r.value);
     } catch (e) {
       this.note = e instanceof Error ? e.message : String(e);
       return false;
     } finally {
       this.local--;
     }
+    this.cursor = r.cursor;
+    return true;
+  }
+
+  private locked(snap: ScreenSnapshot): boolean {
+    if (snap.keyboardLocked) this.note = "入力禁止中です（Esc でリセット）";
+    return snap.keyboardLocked;
   }
 
   private type(ch: string, snap: ScreenSnapshot): void {
+    if (this.locked(snap)) return;
     const f = this.fieldAt(snap);
-    if (!f || snap.keyboardLocked) {
-      this.note = snap.keyboardLocked ? "入力禁止中です（Esc でリセット）" : "ここには入力できません";
+    if (!f) {
+      this.note = "ここには入力できません";
       return;
     }
-    // 第 1 段は SBCS の上書きだけ。全角・DBCS 欄は、編集ロジックの切り出し（第 2 段）まで受けない
-    if (isFullWidth(ch) || f.dbcsType !== undefined) {
-      this.note = "全角・DBCS 欄の入力は未対応です";
+    if (this.exitedIndex === f.index) {
+      this.note = MSG_FIELD_EXIT_KEY;
       return;
     }
-    if (f.keyboardInhibited) {
-      this.note = "この欄はキーボードから入力できません";
-      return;
+    const r = typeInto(f, snap, this.cursor, ch, this.env(snap));
+    if (!this.apply(f, r) || !r.ok) return;
+    if (r.filled === true) {
+      // 満杯: Field Exit が必須の欄は留まり「出た」状態にする。そうでなければ次の入力欄へ（ACS）
+      if (f.fieldExitRequired) this.exitedIndex = f.index;
+      else this.toField(this.session.snapshot(), +1);
     }
-    const v = this.chars(f);
-    const off = this.cursor.col - f.col;
-    v[off] = f.monocase ? ch.toUpperCase() : ch;
-    if (!this.write(f, v)) return;
-    if (off + 1 < f.length) this.cursor = { ...this.cursor, col: this.cursor.col + 1 };
-    else if (!f.fieldExitRequired) this.toField(this.session.snapshot(), +1); // 満杯で次の入力欄へ（ACS。FER の欄は留まる）
   }
 
   private backspace(snap: ScreenSnapshot): void {
+    if (this.locked(snap)) return;
     const f = this.fieldAt(snap);
-    if (!f || this.cursor.col <= f.col) {
+    if (!f || (f.row === this.cursor.row && this.cursor.col <= f.col)) {
       this.move(snap, 0, -1);
       return;
     }
-    this.cursor = { ...this.cursor, col: this.cursor.col - 1 };
-    this.blank(snap, this.cursor.col);
+    this.apply(f, backspaceAt(f, snap, this.cursor, this.env(snap)));
   }
 
-  private blank(snap: ScreenSnapshot, col: number): void {
-    const f = this.fieldAt(snap, { row: this.cursor.row, col });
-    if (!f || snap.keyboardLocked) return;
-    const v = this.chars(f);
-    v[col - f.col] = " ";
-    this.write(f, v);
-  }
-
-  /** 簡易の Field Exit: カーソルから欄末までを空にして次の入力欄へ（右寄せ・符号の整形は第 2 段） */
-  private fieldExit(snap: ScreenSnapshot): void {
+  private delete(snap: ScreenSnapshot): void {
+    if (this.locked(snap)) return;
     const f = this.fieldAt(snap);
     if (!f) return;
-    const v = this.chars(f);
-    for (let i = this.cursor.col - f.col; i < v.length; i++) v[i] = " ";
-    if (this.write(f, v)) this.toField(this.session.snapshot(), +1);
+    this.apply(f, deleteAt(f, snap, this.cursor, this.env(snap)));
+  }
+
+  /** Field Exit: カーソル以降を消し、右寄せ（ADJUST）を掛けて次の入力欄へ */
+  private fieldExit(snap: ScreenSnapshot): void {
+    if (this.locked(snap)) return;
+    const f = this.fieldAt(snap);
+    if (!f) return;
+    if (this.apply(f, exitAt(f, snap, this.cursor, this.env(snap)))) this.toField(this.session.snapshot(), +1);
   }
 }
