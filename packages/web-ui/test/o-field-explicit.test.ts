@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dbcsByteLength, columnView, dbcsViewLayout, SO_MARK, SI_MARK, hasShiftMarks } from "../src/composables/fieldValidate.js";
+import { dbcsByteLength, columnView, dbcsViewLayout, SO_MARK, SI_MARK, hasShiftMarks } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * **O 欄の明示の並び**（`20260928-o-field-cells`）: 値に SO/SI の印があれば、印を SO/SI の桁として数え・描き、暗黙の SO/SI を足さない。

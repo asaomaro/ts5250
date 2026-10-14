@@ -1,5 +1,6 @@
-import type { Field } from "@ts5250/tn5250";
-import { isDbcsOnly, isRawSentinel, rawSentinel, sentinelByte, isSplitLead, isSplitTail } from "@ts5250/tn5250/browser";
+import type { Field } from "../screen/types.js";
+import { isRawSentinel, rawSentinel, sentinelByte, isSplitLead, isSplitTail } from "../screen/attr-sentinel.js";
+import { isDbcsOnly } from "../screen/field-validate.js";
 import { isFullWidth, isCertainWideGlyph } from "@ts5250/base";
 import { isKatakana290InvalidChar } from "@ts5250/ebcdic/katakana";
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { toCells, fromCells, overwrite, insert, del, backspace, eraseToEnd, cellOfEntry, entryOfCell, type OCell, type OResult } from "../src/composables/oFieldCells.js";
-import { SO_MARK, SI_MARK } from "../src/composables/fieldValidate.js";
+import { toCells, fromCells, overwrite, insert, del, backspace, eraseToEnd, cellOfEntry, entryOfCell, type OCell, type OResult } from "@ts5250/tn5250/edit/oFieldCells";
+import { SO_MARK, SI_MARK } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * **O 欄のセルの編集**（`20260928-o-field-cells`）。期待値は実機の ACS のコアに同じ打鍵をさせてホストが受け取ったバイト列

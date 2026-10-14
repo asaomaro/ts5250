@@ -6,7 +6,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 import { keybindingsStore } from "../src/stores/keybindings.js";
-import { SO_MARK, SI_MARK, DEAD_MARK } from "../src/composables/fieldValidate.js";
+import { SO_MARK, SI_MARK, DEAD_MARK } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * **J・全角の E の欄は、欄の形（`jeShapeOf`）どおりの印入りの値で送る**（`20260928-je-field-shape`）。

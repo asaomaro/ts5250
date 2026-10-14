@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import { fieldSign, dupFill, DUP_BYTE, type EditState } from "../src/composables/fieldEdit.js";
+import { fieldSign, dupFill, DUP_BYTE, type EditState } from "@ts5250/tn5250/edit/fieldEdit";
 import { MSG_DUP_DISALLOWED, MSG_FIELD_MINUS_INVALID } from "../src/composables/opMessages.js";
 import { rawSentinel, isRawSentinel, sentinelByte } from "@ts5250/tn5250/browser";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";

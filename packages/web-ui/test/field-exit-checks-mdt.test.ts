@@ -4,7 +4,7 @@ import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import { MSG_MANDATORY_ENTER_EXIT, MSG_MANDATORY_FILL } from "../src/composables/opMessages.js";
-import { fieldExitRejection, findMandatoryEnterViolation, findFieldViolation } from "../src/composables/mandatoryCheck.js";
+import { fieldExitRejection, findMandatoryEnterViolation, findFieldViolation } from "@ts5250/tn5250/edit/mandatoryCheck";
 
 /**
  * **Field Exit の検査の「欄の先頭」と MDT を ACS と同じにする**（`20260921-field-exit-checks` の節目の独立点検の指摘）。

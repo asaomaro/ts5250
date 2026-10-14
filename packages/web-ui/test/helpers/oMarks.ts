@@ -1,4 +1,4 @@
-import { SO_MARK, SI_MARK } from "../../src/composables/fieldValidate.js";
+import { SO_MARK, SI_MARK } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * **O 欄の値をセルの記法で書く**（`20260928-o-field-cells`）: `{` を SO の印、`}` を SI の印に置き換える。

@@ -43,7 +43,7 @@ import {
   findFieldViolation,
   findMandatoryEnterViolation,
   type MandatoryFinding
-} from "./composables/mandatoryCheck.js";
+} from "@ts5250/tn5250/edit/mandatoryCheck";
 import { fieldAt } from "./composables/useCursor.js";
 import {
   MSG_MANDATORY_ENTER,

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { chainInsert, chainOverwrite, chainDelete, chainBackspace, type ChainPos, type ChainResult } from "../src/composables/oChainCells.js";
+import { chainInsert, chainOverwrite, chainDelete, chainBackspace, type ChainPos, type ChainResult } from "@ts5250/tn5250/edit/oChainCells";
 import { splitLead, SPLIT_TAIL } from "@ts5250/tn5250/browser";
-import { eraseToEnd, toCells, fromCells, nulCell, type OCell } from "../src/composables/oFieldCells.js";
-import { DEAD_MARK, SO_MARK, SI_MARK, hasShiftMarks, dbcsByteLength, columnView } from "../src/composables/fieldValidate.js";
+import { eraseToEnd, toCells, fromCells, nulCell, type OCell } from "@ts5250/tn5250/edit/oFieldCells";
+import { DEAD_MARK, SO_MARK, SI_MARK, hasShiftMarks, dbcsByteLength, columnView } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * **継続した O 欄の鎖の編集**（`20260928-cont-o-cells`）。期待値は実機の ACS のコアに同じ打鍵をさせてホストが受け取ったバイト列

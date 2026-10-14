@@ -22,8 +22,8 @@ import {
   dupFill,
   DUP_BYTE,
   type EditState
-} from "../composables/fieldEdit.js";
-import { wordWrap, NUL as WRAP_NUL } from "../composables/wordWrap.js";
+} from "@ts5250/tn5250/edit/fieldEdit";
+import { wordWrap, NUL as WRAP_NUL } from "@ts5250/tn5250/edit/wordWrap";
 import {
   acceptsChar,
   rejectReason,
@@ -43,7 +43,7 @@ import {
   hasShiftMarks,
   type DbcsViewLayout,
   type RejectReason
-} from "../composables/fieldValidate.js";
+} from "@ts5250/tn5250/edit/fieldValidate";
 import {
   toCells,
   fromCells,
@@ -56,8 +56,8 @@ import {
   eraseToEnd as oEraseToEnd,
   type OCell,
   type OResult
-} from "../composables/oFieldCells.js";
-import { chainInsert, chainOverwrite, chainDelete, chainBackspace, chainPaste, type ChainPos, type ChainResult } from "../composables/oChainCells.js";
+} from "@ts5250/tn5250/edit/oFieldCells";
+import { chainInsert, chainOverwrite, chainDelete, chainBackspace, chainPaste, type ChainPos, type ChainResult } from "@ts5250/tn5250/edit/oChainCells";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import {
   detectFkeyLegends,
@@ -90,7 +90,7 @@ import {
   type DateValue,
   type TimeValue
 } from "../composables/dateTimeField.js";
-import { isFieldExitRequired, fieldExitRejection } from "../composables/mandatoryCheck.js";
+import { isFieldExitRequired, fieldExitRejection } from "@ts5250/tn5250/edit/mandatoryCheck";
 import {
   MSG_PROTECTED,
   MSG_NO_ROOM,
@@ -110,7 +110,7 @@ import {
 import { localEditActionOf, numpadFieldSign, hasKeyBinding, charBindingOf } from "../composables/useKeymap.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
-import { continuedRunOf as runOf } from "../composables/continuedRun.js";
+import { continuedRunOf as runOf } from "@ts5250/tn5250/edit/continuedRun";
 import { cycleTab } from "../composables/focusTrap.js";
 import {
   fieldSlices,
@@ -118,7 +118,7 @@ import {
   posOfOffset,
   offsetOfPos,
   type FieldSlice
-} from "../composables/fieldSlices.js";
+} from "@ts5250/tn5250/edit/fieldSlices";
 // **表示コード切替は `@ts5250/ebcdic/katakana` から直接取る**（930/939 の SBCS 部のみ）。
 // バレルや `…/codec` に向けると DBCS 部込みの変換表が持ち込まれる——実測で本番バンドルが
 // 約 600 KB 膨らんでいた。実際に要るのは SBCS 部 256 要素ずつだけ。

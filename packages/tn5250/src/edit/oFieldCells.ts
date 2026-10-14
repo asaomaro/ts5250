@@ -11,7 +11,7 @@
  * 当たらない形で、値もカーソルも変えずエラーも出さない（`noop`）
  */
 import { SO_MARK, SI_MARK, DEAD_MARK, hasShiftMarks, isDeadMark, isWideForDbcs } from "./fieldValidate.js";
-import { splitLead, isSplitLead, splitLeadChar, SPLIT_TAIL, isSplitTail } from "@ts5250/tn5250/browser";
+import { splitLead, isSplitLead, splitLeadChar, SPLIT_TAIL, isSplitTail } from "../screen/attr-sentinel.js";
 
 export type OCellKind = "sb" | "so" | "si" | "lead" | "tail";
 /**

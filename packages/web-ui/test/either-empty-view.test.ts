@@ -7,7 +7,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 import { keybindingsStore } from "../src/stores/keybindings.js";
-import { SO_MARK, SI_MARK, DEAD_MARK } from "../src/composables/fieldValidate.js";
+import { SO_MARK, SI_MARK, DEAD_MARK } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * **全角の状態の E・J の欄のカーソルの桁と End**（`20260928-either-empty-view`）。欄は (17,10) の 12 桁。期待値は実機の ACS のコアの測定:

@@ -2,8 +2,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import { mandatoryFillViolated } from "../src/composables/mandatoryCheck.js";
-import { SO_MARK, SI_MARK, DEAD_MARK, WIDE_NUL } from "../src/composables/fieldValidate.js";
+import { mandatoryFillViolated } from "@ts5250/tn5250/edit/mandatoryCheck";
+import { SO_MARK, SI_MARK, DEAD_MARK, WIDE_NUL } from "@ts5250/tn5250/edit/fieldValidate";
 import { keepWide } from "@ts5250/tn5250/browser";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
