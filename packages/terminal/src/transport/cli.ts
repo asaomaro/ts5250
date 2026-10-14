@@ -8,12 +8,13 @@
  */
 import { readFileSync } from "node:fs";
 import { Session5250, ReplayTransport, parseTraceJsonl, isDbcsCcsid } from "@ts5250/tn5250";
-import { renderFrame, paintDiff, type ColorMode } from "../render/frame.js";
-import { KeyDecoder } from "../input/decode.js";
-import { TerminalController, PREFIX_DEFAULT } from "../app/controller.js";
+import { PREFIX_DEFAULT } from "../app/controller.js";
+import { runTerminal } from "./run.js";
+import { WsSession } from "./ws-session.js";
 
 const USAGE = `使い方: ts5250-term --host <ホスト> [--port N] [--tls] [--ccsid N] [--size 24x80|27x132]
                     [--user U] [--password-env 環境変数名] [--device 装置名] [--prefix 文字]
+      ts5250-term --ws ws://127.0.0.1:3400/ws [--session srv:名 | --system srv:名 | --attach セッションID | --host …]
       ts5250-term --replay <記録.jsonl> [--ccsid N]   （記録の再生。ホスト不要。画面確認・試験用）
   操作: 矢印=移動 Tab/Shift+Tab=欄移動 Enter・F1〜F12・Shift+F1〜F12(=F13〜F24)・PageUp/Down=AID
         Esc=リセット  Ctrl+${PREFIX_DEFAULT} の次: a=Attn s=SysReq h=Help p=Print c=Clear r=Reset e=FieldExit i=挿入 1-3=PA q=終了
@@ -24,12 +25,6 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-function colorMode(): ColorMode {
-  const c = process.env["COLORTERM"] ?? "";
-  if (c === "truecolor" || c === "24bit" || process.env["WT_SESSION"] || process.env["TERM_PROGRAM"] === "vscode") return "truecolor";
-  return "256";
-}
-
 async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     process.stdout.write(USAGE + "\n");
@@ -37,7 +32,8 @@ async function main(): Promise<void> {
   }
   const host = arg("host");
   const replay = arg("replay");
-  if (!host && !replay) {
+  const wsUrl = arg("ws");
+  if (!host && !replay && !wsUrl) {
     process.stderr.write(USAGE + "\n");
     process.exitCode = 2;
     return;
@@ -45,6 +41,28 @@ async function main(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     process.stderr.write("標準入出力が端末ではありません\n");
     process.exitCode = 2;
+    return;
+  }
+  if (wsUrl) {
+    // サーバーの WebSocket へ繋ぐ（セッションはサーバーが持つ。ブラウザ・MCP と共有できる）
+    const pw = process.env[arg("password-env") ?? "AS400_PASSWORD"];
+    const ws = await WsSession.open(wsUrl, {
+      ...(arg("session") ? { session: arg("session")! } : {}),
+      ...(arg("system") ? { system: arg("system")! } : {}),
+      ...(arg("attach") ? { sessionId: arg("attach")! } : {}),
+      ...(host ? { host } : {}),
+      ...(arg("port") ? { port: Number(arg("port")) } : {}),
+      ...(process.argv.includes("--tls") ? { tls: true } : {}),
+      ...(arg("ccsid") ? { ccsid: Number(arg("ccsid")) } : {}),
+      ...(arg("size") === "27x132" || arg("size") === "24x80" ? { screenSize: arg("size") as "24x80" | "27x132" } : {}),
+      ...(arg("device") ? { deviceName: arg("device")! } : {}),
+      ...(arg("user") ? { user: arg("user")! } : {}),
+      ...(arg("user") && pw ? { password: pw } : {})
+    });
+    runTerminal(
+      { session: ws, onScreen: (cb) => ws.onScreen(cb), onClosed: (cb) => ws.onClosed(cb) },
+      { prefix: arg("prefix") ?? PREFIX_DEFAULT, sbcsOnly: !isDbcsCcsid(ws.ccsid) }
+    );
     return;
   }
   const pwEnv = arg("password-env") ?? "AS400_PASSWORD";
@@ -67,72 +85,14 @@ async function main(): Promise<void> {
     warn: () => {}
   });
 
-  const ctl = new TerminalController(session, { prefix: arg("prefix") ?? PREFIX_DEFAULT, sbcsOnly: !isDbcsCcsid(session.ccsid) });
-  const decoder = new KeyDecoder();
-  const mode = colorMode();
-  let prev: string[] | undefined;
-
-  const out = (s: string): void => void process.stdout.write(s);
-  const paint = (full = false): void => {
-    const f = renderFrame(session.snapshot(), {
-      viewport: { cols: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 25 },
-      colorMode: mode,
-      note: ctl.note,
-      cursor: ctl.cursor,
-      insert: ctl.insertMode
-    });
-    out(paintDiff(full ? undefined : prev, f));
-    prev = f.rows;
-  };
-  const restore = (): void => {
-    // 代替画面・折返し・括弧付きペースト・カーソルを元へ
-    out("\x1b[0m\x1b[?2004l\x1b[?7h\x1b[?25h\x1b[?1049l");
-    if (process.stdin.isTTY) process.stdin.setRawMode(false);
-  };
-  const finish = (): void => {
-    restore();
-    session.disconnect();
-    process.exit(0);
-  };
-
-  process.stdin.setRawMode(true);
-  process.stdin.setEncoding("utf8");
-  process.stdin.resume();
-  out("\x1b[?1049h\x1b[?7l\x1b[?2004h\x1b[2J");
-  session.on("screen", (s) => {
-    ctl.onScreen(s);
-    paint();
-  });
-  session.on("closed", (reason) => {
-    restore();
-    process.stderr.write(`切断されました: ${reason}\n`);
-    process.exit(0);
-  });
-  process.stdout.on("resize", () => {
-    out("\x1b[2J");
-    paint(true);
-  });
-
-  // ESC 単独は続きの有無を待って確定する（25ms。sodashitsu の端末版と同じ値）
-  let escTimer: ReturnType<typeof setTimeout> | undefined;
-  process.stdin.on("data", (chunk: string) => {
-    if (escTimer) clearTimeout(escTimer);
-    void (async () => {
-      for (const ev of decoder.feed(chunk)) {
-        await ctl.handle(ev);
-        if (ctl.quit) return finish();
-      }
-      paint();
-      escTimer = setTimeout(() => {
-        void (async () => {
-          for (const ev of decoder.flush()) await ctl.handle(ev);
-          paint();
-        })();
-      }, 25);
-    })();
-  });
-  process.on("SIGTERM", finish);
-  paint(true);
+  runTerminal(
+    {
+      session,
+      onScreen: (cb) => void session.on("screen", cb),
+      onClosed: (cb) => void session.on("closed", cb)
+    },
+    { prefix: arg("prefix") ?? PREFIX_DEFAULT, sbcsOnly: !isDbcsCcsid(session.ccsid) }
+  );
 }
 
 void main().catch((e: unknown) => {

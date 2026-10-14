@@ -26,6 +26,9 @@
       "path": "packages/terminal"
     },
     {
+      "path": "packages/cli"
+    },
+    {
       "path": "packages/server"
     },
     {

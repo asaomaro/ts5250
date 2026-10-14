@@ -12,6 +12,13 @@
 - D10: 満杯で次の入力欄へ進む／Field Exit 必須欄で留まって次の字をエラーにする、は web-ui の `ScreenGrid` の規則（ACS `fieldExited`）に合わせた。
 - D11: メッセージ文言は web-ui の `opMessages.ts` と同じ語を `editing.ts` に置いた。**文言が 2 か所にある**ので、web-ui 側が変わったら追従が要る（`opMessages` を tn5250 へ移す案は未決）。
 
+## 第 4 段（`ts5250` / `ts5250ctl`。利用者の依頼 2026-10-14）
+- D12: 新パッケージ `@ts5250/cli`（bin `ts5250`・`ts5250ctl`）。terminal が server に依存しない向きを守るため、両方に依存する薄い入口を別に置いた。`private`。
+- D13: `ts5250` はサーバーを**子プロセス**で起動し、WebSocket に繋ぐ。`main.ts` が起動関数を公開していないこと・ログが stderr で端末に混ざることが理由。起動引数は `start.sh` と同じ（`.env` があれば `--env-file`、`profiles.local.json` → `profiles.json`）。サーバー本体のポート指定は `--http <N>` なので、`--port` を直して渡す。
+- D14: 端末の接続は 2 通り（直接 `Session5250`／サーバーの WebSocket）。WebSocket 側は `WsSession`（terminal の transport）。**打った値は AID を送るまで手元に持ち、`key.fields` でまとめて渡す**（web-ui と同じ約束）。描画と編集の入力には `overlayField` で重ねた画面を使う。画面が替わったら編集値は捨てる（欄の番号が別物のため）。
+- D15: `ts5250ctl` は MCP のクライアント（Streamable HTTP）。ツール一覧・入力スキーマはサーバーから取り、型は `type` で変換する（数・真偽・JSON）。専用のサブコマンドは持たない（ツールが増えても追従不要）。
+- D16: 当初の「`--profile` で `profiles.local.json` を読む」は不要になった。サーバーの `ConfigResolver` が暗号化パスワードの復号まで行うので、`ts5250 [セッション名]` がそれを使う（実機 PUB400 でサインオン済みのメニューまで確認）。
+
 ## 未確認（第 1 段）
 - 実機（IBM i）: 利用者の指示で PUB400 に接続し、サインオン・メニュー表示・数字入力・Enter での画面遷移を確認した（接続先・認証は記録しない）。挿入・Delete・全角入力の実機確認は第 3 段の分が未実施。
 - Windows Terminal / VS Code 端末での表示は、利用者の判断（sodashitsu の端末版で表示できている）に依る。当 PJ では未実測。

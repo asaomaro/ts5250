@@ -1,0 +1,25 @@
+{
+  "name": "@ts5250/cli",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "description": "Command-line entry points: `ts5250` (server + character terminal) and `ts5250ctl` (MCP tool runner).",
+  "type": "module",
+  "bin": {
+    "ts5250": "./dist/ts5250.js",
+    "ts5250ctl": "./dist/ts5250ctl.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@ts5250/server": "0.1.0",
+    "@ts5250/terminal": "0.1.0",
+    "@ts5250/tn5250": "0.1.0"
+  }
+}
