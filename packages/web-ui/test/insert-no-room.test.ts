@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import { insertChar, typeChar, initEdit, toggleInsert, editValue, type EditState } from "../src/composables/fieldEdit.js";
+import { insertChar, typeChar, initEdit, toggleInsert, editValue, type EditState } from "@ts5250/tn5250/edit/fieldEdit";
 import { MSG_NO_ROOM, MSG_FIELD_EXIT_KEY_INVALID } from "../src/composables/opMessages.js";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 

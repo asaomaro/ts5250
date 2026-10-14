@@ -5,7 +5,7 @@ import ScreenGrid from "../src/components/ScreenGrid.vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import type { WsClient } from "../src/ws-client.js";
-import { rejectReason, isSignPosition } from "../src/composables/fieldValidate.js";
+import { rejectReason, isSignPosition } from "@ts5250/tn5250/edit/fieldValidate";
 import {
   MSG_BY_REASON,
   MSG_FIELD_EXIT_KEY_INVALID,

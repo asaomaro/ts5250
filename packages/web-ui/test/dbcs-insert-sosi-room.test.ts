@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { o } from "./helpers/oMarks.js";
-import { DEAD_MARK } from "../src/composables/fieldValidate.js";
+import { DEAD_MARK } from "@ts5250/tn5250/edit/fieldValidate";
 import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";

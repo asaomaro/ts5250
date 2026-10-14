@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { Cell, ScreenSnapshot } from "@ts5250/tn5250";
-import { isFullWidth } from "../src/composables/fieldValidate.js";
+import { isFullWidth } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * **相方を失った DBCS セルは 1 桁で描く（ACS 準拠）。**

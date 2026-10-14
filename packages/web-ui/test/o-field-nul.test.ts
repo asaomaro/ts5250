@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import { mandatoryFillViolated } from "../src/composables/mandatoryCheck.js";
+import { mandatoryFillViolated } from "@ts5250/tn5250/edit/mandatoryCheck";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import { o } from "./helpers/oMarks.js";
 

@@ -1,4 +1,4 @@
-import type { Field } from "@ts5250/tn5250";
+import type { Field } from "../screen/types.js";
 
 /**
  * **継続入力フィールド（EDTMSK 分割）の区間の並び**（先頭 → 最終）。単独欄は自分 1 つだけ。

@@ -7,7 +7,7 @@ import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 import { keybindingsStore } from "../src/stores/keybindings.js";
 import { rawSentinel } from "@ts5250/tn5250/browser";
-import { SO_MARK, SI_MARK, DEAD_MARK } from "../src/composables/fieldValidate.js";
+import { SO_MARK, SI_MARK, DEAD_MARK } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * **E（DBCS either）の欄の残り**（`20260930-either-remainder`）。期待値は実機の ACS のコア（`scripts/acs-probe/either-remainder.txt`・`either-insert.txt`）で

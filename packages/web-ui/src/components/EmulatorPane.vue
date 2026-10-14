@@ -36,9 +36,9 @@ import { isKatakanaCcsid } from "../hostCodePages.js";
 import { isDbcsCcsid, progressionTarget, progressionNumberOf, progressionStuck } from "@ts5250/tn5250/browser";
 import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
 import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError, MSG_MANDATORY_FILL, MSG_SELF_CHECK, MSG_SYSREQ_KEY_INVALID } from "../composables/opMessages.js";
-import { findFieldViolation, needsFieldExit, type MandatoryFinding } from "../composables/mandatoryCheck.js";
-import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
-import { continuedRunOf, isTabStopField } from "../composables/continuedRun.js";
+import { findFieldViolation, needsFieldExit, type MandatoryFinding } from "@ts5250/tn5250/edit/mandatoryCheck";
+import { fieldSlices, fieldSpan, posOfOffset } from "@ts5250/tn5250/edit/fieldSlices";
+import { continuedRunOf, isTabStopField } from "@ts5250/tn5250/edit/continuedRun";
 
 const props = defineProps<{ sessionId: string; focused: boolean }>();
 /** この画面（セッション）の実効表示設定＝セッション上書き ?? アプリ既定 */

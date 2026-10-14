@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { o } from "./helpers/oMarks.js";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import { columnView, isFullWidth } from "../src/composables/fieldValidate.js";
+import { columnView, isFullWidth } from "@ts5250/tn5250/edit/fieldValidate";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**

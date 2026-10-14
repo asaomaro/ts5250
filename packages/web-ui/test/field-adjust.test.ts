@@ -7,7 +7,7 @@ import {
   applyAdjust,
   fieldExit,
   type AdjustSpec
-} from "../src/composables/fieldEdit.js";
+} from "@ts5250/tn5250/edit/fieldEdit";
 
 /**
  * 期待値の根拠は **ACS `PS5250.performRightAdjustFill`**（空きは欄末尾から続く NUL の数だけ）と、実機の ACS のコアの測定

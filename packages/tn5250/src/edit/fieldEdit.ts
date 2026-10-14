@@ -4,7 +4,7 @@
  * 印字文字・Backspace・Delete・カーソル移動を 5250 の挙動で計算する。
  * 長さはフィールド長でクランプ（value は field.length 桁の枠内）。
  */
-import { isRawSentinel, rawSentinel, sentinelByte } from "@ts5250/tn5250/browser";
+import { isRawSentinel, rawSentinel, sentinelByte } from "../screen/attr-sentinel.js";
 export interface EditState {
   /** 現在値（末尾空白は含みうる。表示・送信時に整形） */
   chars: string[]; // 長さ = fieldLength（空白パディング）

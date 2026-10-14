@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Field } from "@ts5250/tn5250";
-import { findFieldViolation } from "../src/composables/mandatoryCheck.js";
-import { rejectReason } from "../src/composables/fieldValidate.js";
+import { findFieldViolation } from "@ts5250/tn5250/edit/mandatoryCheck";
+import { rejectReason } from "@ts5250/tn5250/edit/fieldValidate";
 import { MSG_BY_REASON, MSG_SELF_CHECK } from "../src/composables/opMessages.js";
 
 /**
