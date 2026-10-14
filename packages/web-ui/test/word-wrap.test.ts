@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { initEdit, typeChar, insertChar, backspace, del, eraseToEnd, type EditState } from "../src/composables/fieldEdit.js";
-import { wordWrap, NUL } from "../src/composables/wordWrap.js";
+import { initEdit, typeChar, insertChar, backspace, del, eraseToEnd, type EditState } from "@ts5250/tn5250/edit/fieldEdit";
+import { wordWrap, NUL } from "@ts5250/tn5250/edit/wordWrap";
 
 /**
  * **語送りの欄の語送り**（`20260930-word-wrap`）。期待値は実機の ACS のコア（DSM の WRAPFLD・`scripts/acs-probe/word-wrap.txt`）で

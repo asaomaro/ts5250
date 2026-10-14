@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import { SO_MARK, SI_MARK } from "../src/composables/fieldValidate.js";
+import { SO_MARK, SI_MARK } from "@ts5250/tn5250/edit/fieldValidate";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**

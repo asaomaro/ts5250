@@ -1,6 +1,6 @@
 import { isFullWidth } from "@ts5250/base";
 import type { Cell, Field } from "@ts5250/tn5250";
-import { fieldSpan, offsetOfPos } from "./fieldSlices.js";
+import { fieldSpan, offsetOfPos } from "@ts5250/tn5250/edit/fieldSlices";
 
 /**
  * 画面全体の自由カーソルの移動・判定（DOM 非依存の純関数）。

@@ -4,7 +4,7 @@ import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
-import { DUP_BYTE } from "../src/composables/fieldEdit.js";
+import { DUP_BYTE } from "@ts5250/tn5250/edit/fieldEdit";
 import { rawSentinel } from "@ts5250/tn5250/browser";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";

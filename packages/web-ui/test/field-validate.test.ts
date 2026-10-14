@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { acceptsChar, dbcsByteLength, columnView, dbcsViewLayout, rejectReason } from "../src/composables/fieldValidate.js";
+import { acceptsChar, dbcsByteLength, columnView, dbcsViewLayout, rejectReason } from "@ts5250/tn5250/edit/fieldValidate";
 import type { Field } from "@ts5250/tn5250";
 import { attrSentinel, rawSentinel } from "@ts5250/tn5250/browser";
 

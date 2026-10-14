@@ -6,7 +6,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 import { MSG_MANDATORY_ENTER_EXIT, MSG_MANDATORY_FILL, MSG_BY_REASON, isOperatorError } from "../src/composables/opMessages.js";
-import { fieldExitRejection } from "../src/composables/mandatoryCheck.js";
+import { fieldExitRejection } from "@ts5250/tn5250/edit/mandatoryCheck";
 
 /**
  * **Field Exit・Field± で欄を出る前の検査**（ACS `PS5250.processFieldPlusMinusAndExit`。`20260921-field-exit-checks`）。

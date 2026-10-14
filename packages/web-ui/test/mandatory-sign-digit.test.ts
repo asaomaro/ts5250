@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Field } from "@ts5250/tn5250";
-import { findFieldViolation } from "../src/composables/mandatoryCheck.js";
+import { findFieldViolation } from "@ts5250/tn5250/edit/mandatoryCheck";
 
 /**
  * **符号付き数値の欄の MF・自己点検は符号の桁を数えない**（`20260928-mandatory-sign-digit`）。ACS `Field5250.isFieldFull`・`isAllNulls`・`checkModulusField` は

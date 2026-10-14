@@ -1,6 +1,6 @@
-import type { Field } from "@ts5250/tn5250";
+import type { Field } from "../screen/types.js";
 // browser サブパスから取る（root は node:net/node:tls を巻き込むため不可）
-import { selfCheckDigitOk } from "@ts5250/tn5250/browser";
+import { selfCheckDigitOk } from "../screen/field-validate.js";
 import { dbcsByteLength, isWideForDbcs, WIDE_NUL } from "./fieldValidate.js";
 import { continuedRunOf } from "./continuedRun.js";
 

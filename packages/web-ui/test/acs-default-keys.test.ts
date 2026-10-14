@@ -6,7 +6,7 @@ import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import { keybindingsStore, DEFAULT_BINDINGS, BINDINGS_VERSION } from "../src/stores/keybindings.js";
 import { makeKeydownHandler } from "../src/composables/useKeymap.js";
-import { DUP_BYTE } from "../src/composables/fieldEdit.js";
+import { DUP_BYTE } from "@ts5250/tn5250/edit/fieldEdit";
 import { rawSentinel } from "@ts5250/tn5250/browser";
 import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";

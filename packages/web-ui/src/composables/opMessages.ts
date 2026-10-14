@@ -1,5 +1,5 @@
 import type { ErrorCode } from "@ts5250/base";
-import type { RejectReason } from "./fieldValidate.js";
+import type { RejectReason } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * 操作員メッセージ（クライアント側で出すもの。ホストの `systemMessage` とは別枠）。

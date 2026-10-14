@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { MandatoryFinding } from "../composables/mandatoryCheck.js";
+import type { MandatoryFinding } from "@ts5250/tn5250/edit/mandatoryCheck";
 import type { AidKey } from "@ts5250/tn5250";
 import type { SessionState } from "../stores/sessions.js";
 import { sendKey } from "../session-controller.js";

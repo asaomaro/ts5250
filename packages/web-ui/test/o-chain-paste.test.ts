@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { chainPaste } from "../src/composables/oChainCells.js";
-import { nulCell, type OCell } from "../src/composables/oFieldCells.js";
+import { chainPaste } from "@ts5250/tn5250/edit/oChainCells";
+import { nulCell, type OCell } from "@ts5250/tn5250/edit/oFieldCells";
 
 /**
  * **継続した O 欄への貼り付け**（`20260930-cont-o-edge`）。期待値は実機の ACS のコア（`ECLPS.pasteLineWrap`。DSM の CONTOP・`scripts/acs-probe/cont-o-paste.txt` の P1〜P4）が

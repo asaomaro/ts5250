@@ -6,7 +6,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 import { keybindingsStore } from "../src/stores/keybindings.js";
-import { SO_MARK, SI_MARK } from "../src/composables/fieldValidate.js";
+import { SO_MARK, SI_MARK } from "@ts5250/tn5250/edit/fieldValidate";
 
 /**
  * **継続した O 欄の Erase EOF は空き（NUL）を残す**（`20260930-cont-o-nul`）: 消した桁と続く区間の桁は空き（NUL）で、空白（0x40）にすると中身として送られてしまう

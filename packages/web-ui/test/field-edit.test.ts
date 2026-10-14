@@ -10,7 +10,7 @@ import {
   end,
   toggleInsert,
   paste
-} from "../src/composables/fieldEdit.js";
+} from "@ts5250/tn5250/edit/fieldEdit";
 
 describe("fieldEdit — 上書きモード（5250 既定）", () => {
   it("途中入力は後続をシフトせず置換する", () => {

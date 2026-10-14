@@ -6,8 +6,8 @@ import ScreenGrid from "../src/components/ScreenGrid.vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import { keybindingsStore } from "../src/stores/keybindings.js";
-import { deleteWord, deleteWordLength, type EditState } from "../src/composables/fieldEdit.js";
-import { isWideForDbcs } from "../src/composables/fieldValidate.js";
+import { deleteWord, deleteWordLength, type EditState } from "@ts5250/tn5250/edit/fieldEdit";
+import { isWideForDbcs } from "@ts5250/tn5250/edit/fieldValidate";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 

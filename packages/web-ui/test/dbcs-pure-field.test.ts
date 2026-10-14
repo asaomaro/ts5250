@@ -4,8 +4,8 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { MSG_NO_ROOM } from "../src/composables/opMessages.js";
-import { dbcsByteLength } from "../src/composables/fieldValidate.js";
-import { mandatoryFillViolated } from "../src/composables/mandatoryCheck.js";
+import { dbcsByteLength } from "@ts5250/tn5250/edit/fieldValidate";
+import { mandatoryFillViolated } from "@ts5250/tn5250/edit/mandatoryCheck";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**

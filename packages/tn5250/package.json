@@ -12,6 +12,10 @@
     "./browser": {
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser.js"
+    },
+    "./edit/*": {
+      "types": "./dist/edit/*.d.ts",
+      "default": "./dist/edit/*.js"
     }
   },
   "files": [
