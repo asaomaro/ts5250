@@ -21,3 +21,7 @@ ts5250ctl <ツール名> --json '{"引数":値}'
   ブラウザ・MCP と同じものを見られる。`--attach セッションID`）。端末の操作は `ts5250-term --help`。
 - `ts5250ctl` の接続先は `--url`（既定 `$TS5250_URL`、無ければ `http://127.0.0.1:3400/mcp`）。
   ツール・引数はサーバーが返すものをそのまま使うので、ツールが増えても変更は要らない。
+
+## PATH に通す
+`node scripts/make-bin.mjs` が `bin/ts5250`・`bin/ts5250ctl`（POSIX）と `bin/ts5250.bat`・`bin/ts5250ctl.bat`（Windows）を作る。
+`bin/` を PATH に足すと、どこからでも `ts5250` / `ts5250ctl` を打てる（先に `npm run build`）。
