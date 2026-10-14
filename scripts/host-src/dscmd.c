@@ -763,6 +763,36 @@ int main(int argc, char *argv[]) {
             logInpBuf(buf);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "CONTSB") == 0) {
+        /*
+         * **継続した SBCS 欄（EDTMSK 相当の 3 区間。FCW 0x8601 / 0x8603 / 0x8602）を 1 つ出して待つ画面**。端末前面の編集を実機で確かめる用。
+         *   (5,10) 先頭 2 桁 `12` / (5,13) 中間 2 桁 `34` / (5,16) 最終 2 桁 `56`。IC は 5,10。READ MDT で 1 回読んで終える
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x86, 0x01, 0x24, 0x00, 0x02,
+            0xF1, 0xF2,
+            0x11, 0x05, 0x0C, 0x1D, 0x40, 0x00, 0x86, 0x03, 0x24, 0x00, 0x02,
+            0xF3, 0xF4,
+            0x11, 0x05, 0x0F, 0x1D, 0x40, 0x00, 0x86, 0x02, 0x24, 0x00, 0x02,
+            0xF5, 0xF6,
+            0x13, 0x05, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 継続の SBCS 欄)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "CONTOX") == 0) {
         /*
          * **継続欄の O の編集を 1 巡に 1 件ずつ、ホストが受け取ったバイト列で測る画面**（台帳「継続欄の O」。CONTO の画面の読みでは
