@@ -111,6 +111,8 @@ interface RowCtx {
 function rowOf(cells: readonly Cell[], x: RowCtx): string {
   const { termRow, maxCols, mode, grid, view, sbcs } = x;
   const rowTint = view.rule && x.ruleAt !== undefined && view.ruleStyle !== "vertical" && x.ruleAt.row === x.screenRow;
+  // 文字のある行では横罫を行の縁（上線・下線）に引く。罫線文字（─）は行の中ほどを通り、文字と同じ行に線が走って見える
+  const rowHasText = cells.some((c) => (c.kind === "sbcs" || c.kind === "dbcs-lead") && !c.nonDisplay && c.char !== "" && c.char !== " ");
   let out = `\x1b[${termRow};1H`;
   let last = "";
   let col = 1;
@@ -121,10 +123,14 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
     // DDS の罫線は、文字の無いセルにだけ罫線文字で描く（文字のあるセルは文字を優先）。窓の枠・見出しは背面の上に乗るので上書きする
     const g = grid?.get(x.screenRow * 1000 + cellNo);
     let edge: "top" | "bottom" | undefined;
-    if (g && (g.force === true || ((c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay))) {
+    const hOnly = g !== undefined && g.hEdge !== undefined && g.mask !== undefined && (g.mask & 0b0101) === 0;
+    if (g && hOnly && rowHasText && g.force !== true && !c.nonDisplay) {
+      // 縁の線は空白のセルにも掛ける（下線・上線は空白でも引かれる）。縦罫・角・交点は縁に置けないので下の分岐へ
+      edge = g.hEdge;
+    } else if (g && (g.force === true || ((c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay))) {
       const kind = g.half === "lead" ? "dbcs-lead" : g.half === "tail" ? "dbcs-tail" : "sbcs";
       c = { ...c, kind, char: g.ch, color: g.color, reverse: g.reverse === true, underline: false, columnSeparator: false, nonDisplay: false };
-    } else if (g && g.hEdge && g.mask !== undefined && (g.mask & 0b0101) === 0 && c.kind !== "attr" && !c.nonDisplay) {
+    } else if (g && hOnly && c.kind !== "attr" && !c.nonDisplay) {
       // 文字のあるセルには縦罫も角も置けない。横罫だけは上線・下線で、文字を消さずに重ねる
       edge = g.hEdge;
     }
