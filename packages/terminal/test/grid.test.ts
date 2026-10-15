@@ -18,13 +18,15 @@ const line = (o: Partial<GuiGridLine>): GuiGridLine => ({
 });
 
 describe("DDS の罫線（グリッド罫線）", () => {
-  it("箱は四隅が角の字になり、辺が ─ │ でつながる", async () => {
+  it("箱は縦罫を │ で描き、上辺は上線・下辺は下線で引く（罫線文字を行の中ほどに置かない）", async () => {
     const f = renderFrame(await withLines([line({})]), { viewport: VP, colorMode: "truecolor" });
     const rows = f.rows.map(plain);
     // 持ち主のセル: 上辺は 3 行目、下辺は最終行（5 行目）、左辺は 5 桁目、右辺は最終桁（10 桁目）
-    expect(rows[2]!.slice(4, 10)).toBe("┌────┐");
+    expect(rows[2]!.slice(4, 10)).toBe("│    │");
+    expect(f.rows[2]!).toContain(";53m");
     expect(rows[3]!.slice(4, 10)).toBe("│    │");
-    expect(rows[4]!.slice(4, 10)).toBe("└────┘");
+    expect(rows[4]!.slice(4, 10)).toBe("│    │");
+    expect(f.rows[4]!).toContain(";4m");
   });
 
   it("文字のあるセルは文字を優先する", async () => {

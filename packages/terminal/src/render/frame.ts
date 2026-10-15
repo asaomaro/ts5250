@@ -106,14 +106,11 @@ interface RowCtx {
   view: TermView;
   sbcs: SbcsView;
   ruleAt?: { row: number; col: number };
-  /** この行に文字（空白以外）があるか */
+  /** 横罫を行の縁の線（上線・下線）で引くか。偽なら罫線文字（─ ┼ …）を行の中ほどに置く */
   hasText: boolean;
   /** 下の行の上辺の横罫を、この行の下線として引くセル（キーは `row * 1000 + col`） */
   under: ReadonlySet<number>;
 }
-
-const hasTextIn = (cells: readonly Cell[]): boolean =>
-  cells.some((c) => (c.kind === "sbcs" || c.kind === "dbcs-lead") && !c.nonDisplay && c.char !== "" && c.char !== " ");
 
 function rowOf(cells: readonly Cell[], x: RowCtx): string {
   const { termRow, maxCols, mode, grid, view, sbcs } = x;
@@ -137,6 +134,14 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
       // 上辺は、上線の設定ならこの行の上線、下線の設定なら上の行の下線が引く（先頭行だけは上線）
       if (g.hEdge === "bottom") edge = "bottom";
       else if (view.hrule === "over" || x.screenRow === 1) edge = "top";
+    } else if (g && rowHasText && g.force !== true && g.vch !== undefined && g.mask !== undefined && (g.mask & 0b1010) !== 0 && !c.nonDisplay) {
+      // 縦横が交わるセル（┼ ├ ┤ ┌ …）は、文字のある行では行の中ほどに十字を置くと文字の間に印が浮く。
+      // 縦の腕は縦の字、横の腕は行の縁の線に分ける。文字のあるセルには縦罫を置けないので、そのセルは縁の線だけ
+      if (c.char === " " || c.char === "" || c.kind === "attr") {
+        c = { ...c, kind: "sbcs", char: g.vch, color: g.color, reverse: false, underline: false, columnSeparator: false, nonDisplay: false };
+      }
+      if (g.hEdge === "bottom") edge = "bottom";
+      else if (g.hEdge === "top" && (view.hrule === "over" || x.screenRow === 1)) edge = "top";
     } else if (g && (g.force === true || ((c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay))) {
       const kind = g.half === "lead" ? "dbcs-lead" : g.half === "tail" ? "dbcs-tail" : "sbcs";
       c = { ...c, kind, char: g.ch, color: g.color, reverse: g.reverse === true, underline: false, columnSeparator: false, nonDisplay: false };
@@ -193,12 +198,11 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
   if (top === 1) out.push(`\x1b[1;1H\x1b[0;30;46m${fitText(` ${headerText(view, opts.prefix ?? "]")}`, cols)}\x1b[K${RESET}`);
   const grid = view.grid ? gridOverlay(snap) : undefined;
   const sbcs = resolveSbcsView(view.kana, opts.hostKatakana === true);
-  const texty = snap.cells.map(hasTextIn);
   const under = new Set<number>();
   if (grid) {
     for (const [k, g] of grid) {
       const r = Math.floor(k / 1000);
-      if (view.hrule === "under" && g.hEdge === "top" && g.force !== true && g.mask !== undefined && (g.mask & 0b0101) === 0 && r > 1 && texty[r - 1] === true) {
+      if (view.hrule === "under" && g.hEdge === "top" && g.force !== true && g.mask !== undefined && (g.mask & 0b0101) === 0 && r > 1) {
         under.add((r - 1) * 1000 + (k % 1000));
       }
     }
@@ -213,7 +217,8 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
         ...(grid ? { grid } : {}),
         view,
         sbcs,
-        hasText: texty[r] === true,
+        // 文字の無い行も縁の線で引く。行ごとに中ほど（罫線文字）と縁（上線・下線）が混ざると、表の罫線の高さが行で揺れる
+        hasText: true,
         under,
         ...(opts.ruleAt ? { ruleAt: opts.ruleAt } : {})
       })
