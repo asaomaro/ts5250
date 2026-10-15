@@ -71,6 +71,8 @@ export interface SgrExtra {
   tint?: boolean;
   /** 罫線の横罫を文字のあるセルへ重ねる（上線 SGR 53・下線 SGR 4） */
   edge?: "top" | "bottom" | "both";
+  /** 下線の色（SGR 58）。ホストが罫線に指定した色。上線には色の指定が無く文字色になる */
+  lineColor?: ScreenColor;
 }
 
 export function sgrOf(c: Cell, mode: ColorMode, extra: SgrExtra = {}): string {
@@ -81,6 +83,13 @@ export function sgrOf(c: Cell, mode: ColorMode, extra: SgrExtra = {}): string {
   if (c.underline || extra.edge === "bottom" || extra.edge === "both") p.push("4");
   else if (c.columnSeparator) p.push("4:4");
   if (extra.edge === "top" || extra.edge === "both") p.push("53");
+  // 下線の色は 256 色の番号指定（58:5:N）で渡す。実機の Windows Terminal で確かめた（利用者の画像）:
+  // 色が付いたのは 58:5:N だけで、58:2:R:G:B・空の色空間 ID を付けた 58:2::R:G:B は色が付かず、
+  // セミコロン形式は後続の数が別の属性になって下線が消える。24bit の画面でも番号指定を使う。
+  // 非対応の端末は colon 形式を 1 つの未知の指定として読み飛ばす
+  if (extra.lineColor && (extra.edge === "bottom" || extra.edge === "both")) {
+    p.push(C256[extra.lineColor].replace(/^38;5;(\d+)$/, "58:5:$1"));
+  }
   if (extra.tint && !c.reverse) p.push(mode === "truecolor" ? "48;2;40;48;72" : "48;5;236");
   if (c.blink) p.push("5");
   return `\x1b[${p.join(";")}m`;
@@ -106,14 +115,11 @@ interface RowCtx {
   view: TermView;
   sbcs: SbcsView;
   ruleAt?: { row: number; col: number };
-  /** この行に文字（空白以外）があるか */
+  /** 横罫を行の縁の線（上線・下線）で引くか。偽なら罫線文字（─ ┼ …）を行の中ほどに置く */
   hasText: boolean;
   /** 下の行の上辺の横罫を、この行の下線として引くセル（キーは `row * 1000 + col`） */
-  under: ReadonlySet<number>;
+  under: ReadonlyMap<number, ScreenColor>;
 }
-
-const hasTextIn = (cells: readonly Cell[]): boolean =>
-  cells.some((c) => (c.kind === "sbcs" || c.kind === "dbcs-lead") && !c.nonDisplay && c.char !== "" && c.char !== " ");
 
 function rowOf(cells: readonly Cell[], x: RowCtx): string {
   const { termRow, maxCols, mode, grid, view, sbcs } = x;
@@ -137,6 +143,14 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
       // 上辺は、上線の設定ならこの行の上線、下線の設定なら上の行の下線が引く（先頭行だけは上線）
       if (g.hEdge === "bottom") edge = "bottom";
       else if (view.hrule === "over" || x.screenRow === 1) edge = "top";
+    } else if (g && rowHasText && g.force !== true && g.vch !== undefined && g.mask !== undefined && (g.mask & 0b1010) !== 0 && !c.nonDisplay) {
+      // 縦横が交わるセル（┼ ├ ┤ ┌ …）は、文字のある行では行の中ほどに十字を置くと文字の間に印が浮く。
+      // 縦の腕は縦の字、横の腕は行の縁の線に分ける。文字のあるセルには縦罫を置けないので、そのセルは縁の線だけ
+      if (c.char === " " || c.char === "" || c.kind === "attr") {
+        c = { ...c, kind: "sbcs", char: g.vch, color: g.color, reverse: false, underline: false, columnSeparator: false, nonDisplay: false };
+      }
+      if (g.hEdge === "bottom") edge = "bottom";
+      else if (g.hEdge === "top" && (view.hrule === "over" || x.screenRow === 1)) edge = "top";
     } else if (g && (g.force === true || ((c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay))) {
       const kind = g.half === "lead" ? "dbcs-lead" : g.half === "tail" ? "dbcs-tail" : "sbcs";
       c = { ...c, kind, char: g.ch, color: g.color, reverse: g.reverse === true, underline: false, columnSeparator: false, nonDisplay: false };
@@ -144,7 +158,18 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
       // 文字のあるセルには縦罫も角も置けない。横罫だけは上線・下線で、文字を消さずに重ねる
       edge = g.hEdge;
     }
-    if (x.under.has(x.screenRow * 1000 + cellNo) && !c.nonDisplay) edge = edge === "top" ? "both" : "bottom";
+    // 線の色はホストの指定に合わせる。上線は色の指定が無く文字色になるので、空白のセルは文字色を線の色にする
+    // （文字のあるセルは文字を優先して文字色のまま）。下線は SGR 58 で色を渡す
+    let lineColor: ScreenColor | undefined;
+    if (g && (edge === "top" || edge === "both") && (c.char === " " || c.char === "" || c.kind === "attr") && !c.nonDisplay) {
+      c = { ...c, color: g.color };
+    }
+    if (g && (edge === "bottom" || edge === "both")) lineColor = g.color;
+    const below = x.under.get(x.screenRow * 1000 + cellNo);
+    if (below !== undefined && !c.nonDisplay) {
+      edge = edge === "top" ? "both" : "bottom";
+      lineColor = below;
+    }
     let dim = false;
     if (!c.nonDisplay && (c.kind === "so" || c.kind === "si") && view.sosi !== "none") {
       c = { ...c, kind: "sbcs", char: c.kind === "so" ? "{" : "}" };
@@ -158,7 +183,7 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
     const w = c.kind === "dbcs-lead" ? 2 : 1;
     if (col + w - 1 > maxCols) break; // 全角が端末の右端をまたぐなら描かない
     const tint = rowTint || (view.rule && x.ruleAt !== undefined && view.ruleStyle !== "horizontal" && x.ruleAt.col === cellNo);
-    const sg = sgrOf(c, mode, { ...(dim ? { dim } : {}), ...(tint ? { tint } : {}), ...(edge ? { edge } : {}) });
+    const sg = sgrOf(c, mode, { ...(dim ? { dim } : {}), ...(tint ? { tint } : {}), ...(edge ? { edge } : {}), ...(lineColor ? { lineColor } : {}) });
     if (sg !== last) {
       out += sg;
       last = sg;
@@ -193,13 +218,12 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
   if (top === 1) out.push(`\x1b[1;1H\x1b[0;30;46m${fitText(` ${headerText(view, opts.prefix ?? "]")}`, cols)}\x1b[K${RESET}`);
   const grid = view.grid ? gridOverlay(snap) : undefined;
   const sbcs = resolveSbcsView(view.kana, opts.hostKatakana === true);
-  const texty = snap.cells.map(hasTextIn);
-  const under = new Set<number>();
+  const under = new Map<number, ScreenColor>();
   if (grid) {
     for (const [k, g] of grid) {
       const r = Math.floor(k / 1000);
-      if (view.hrule === "under" && g.hEdge === "top" && g.force !== true && g.mask !== undefined && (g.mask & 0b0101) === 0 && r > 1 && texty[r - 1] === true) {
-        under.add((r - 1) * 1000 + (k % 1000));
+      if (view.hrule === "under" && g.hEdge === "top" && g.force !== true && g.mask !== undefined && (g.mask & 0b0101) === 0 && r > 1) {
+        under.set((r - 1) * 1000 + (k % 1000), g.color);
       }
     }
   }
@@ -213,7 +237,8 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
         ...(grid ? { grid } : {}),
         view,
         sbcs,
-        hasText: texty[r] === true,
+        // 文字の無い行も縁の線で引く。行ごとに中ほど（罫線文字）と縁（上線・下線）が混ざると、表の罫線の高さが行で揺れる
+        hasText: true,
         under,
         ...(opts.ruleAt ? { ruleAt: opts.ruleAt } : {})
       })

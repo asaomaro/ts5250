@@ -23,7 +23,7 @@ export interface TermView {
   grid: boolean;
   /**
    * 文字のある行の上辺の横罫を、その行の上線（SGR 53）で引くか、上の行の下線（SGR 4）で引くか。
-   * 上線は Windows Terminal で描かれることを実機で確かめた（20261015）。上線に対応しない端末では `under` を選ぶ
+   * 既定は下線（SGR 58 で罫線の色をホストの指定どおりにできる。Windows Terminal で確認）。上線（SGR 53）は色を指定できず文字色になる
    */
   hrule: "over" | "under";
   sosi: SosiMode;
@@ -44,7 +44,7 @@ export interface TermView {
 /** 起動時の既定。web-ui の既定（罫線 ON・SO/SI 非表示・表示コード auto・ブロック・明滅 ON・ルーラー OFF）に合わせる */
 export const DEFAULT_VIEW: TermView = {
   grid: true,
-  hrule: "over",
+  hrule: "under",
   sosi: "none",
   kana: "auto",
   cursorShape: "block",

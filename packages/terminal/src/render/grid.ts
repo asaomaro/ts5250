@@ -54,8 +54,10 @@ export interface GridCell {
   half?: "lead" | "tail";
   /** 腕の組（N=1 E=2 S=4 W=8）。文字のあるセルへ横線だけを重ねるか決めるのに使う */
   mask?: number;
-  /** 横罫のとき、線がそのセルの上辺か下辺か（文字のあるセルは上線・下線で表す） */
+  /** 横罫のとき、線がそのセルの上辺か下辺か（文字のある行は上線・下線で表す） */
   hEdge?: "top" | "bottom";
+  /** 縦の腕（N・S）だけの罫線文字。縦横が交わるセルを、文字のある行では「縦の字 + 上線・下線」に分けて描く */
+  vch?: string;
 }
 
 /** 罫線の置き場。キーは `row * 1000 + col`（1 始まり）。空なら `undefined` */
@@ -78,7 +80,11 @@ export function gridOverlay(snap: ScreenSnapshot): Map<number, GridCell> | undef
   };
   for (const g of lines) segmentsOf(g, add);
   const out = new Map<number, GridCell>();
-  for (const [k, v] of acc) out.set(k, { ch: glyph(v.mask, v.style), color: v.color, mask: v.mask, ...(v.hEdge ? { hEdge: v.hEdge } : {}) });
+  for (const [k, v] of acc) {
+    // 縦の腕があれば全高の縦線にする（╷ ╵ は行の半分で、縁の上線・下線とつながらない）
+    const vch = (v.mask & (N | S)) !== 0 ? glyph(N | S, v.style) : " ";
+    out.set(k, { ch: glyph(v.mask, v.style), color: v.color, mask: v.mask, ...(v.hEdge ? { hEdge: v.hEdge } : {}), ...(vch !== " " ? { vch } : {}) });
+  }
   for (const w of windows) windowCells(w, snap, out);
   return out.size > 0 ? out : undefined;
 }
