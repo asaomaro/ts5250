@@ -83,11 +83,12 @@ export function sgrOf(c: Cell, mode: ColorMode, extra: SgrExtra = {}): string {
   if (c.underline || extra.edge === "bottom" || extra.edge === "both") p.push("4");
   else if (c.columnSeparator) p.push("4:4");
   if (extra.edge === "top" || extra.edge === "both") p.push("53");
-  // 下線の色は colon 形式（58:2::R:G:B）で渡す。非対応の端末は 1 つの未知の指定として読み飛ばす
-  // （セミコロン形式だと後続の数が別の属性として解釈される）
+  // 下線の色は 256 色の番号指定（58:5:N）で渡す。実機の Windows Terminal で確かめた（利用者の画像）:
+  // 色が付いたのは 58:5:N だけで、58:2:R:G:B・空の色空間 ID を付けた 58:2::R:G:B は色が付かず、
+  // セミコロン形式は後続の数が別の属性になって下線が消える。24bit の画面でも番号指定を使う。
+  // 非対応の端末は colon 形式を 1 つの未知の指定として読み飛ばす
   if (extra.lineColor && (extra.edge === "bottom" || extra.edge === "both")) {
-    const t = (mode === "truecolor" ? TRUE : C256)[extra.lineColor];
-    p.push(t.replace(/^38;2;(\d+);(\d+);(\d+)$/, "58:2::$1:$2:$3").replace(/^38;5;(\d+)$/, "58:5:$1"));
+    p.push(C256[extra.lineColor].replace(/^38;5;(\d+)$/, "58:5:$1"));
   }
   if (extra.tint && !c.reverse) p.push(mode === "truecolor" ? "48;2;40;48;72" : "48;5;236");
   if (c.blink) p.push("5");
