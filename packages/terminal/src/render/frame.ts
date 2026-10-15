@@ -11,6 +11,7 @@
  */
 import type { Cell, ScreenColor, ScreenSnapshot } from "@ts5250/tn5250";
 import { gridOverlay, type GridCell } from "./grid.js";
+import { PLAIN_VIEW, headerText, recodeByte, resolveSbcsView, type SbcsView, type TermView } from "../app/view.js";
 
 export type ColorMode = "truecolor" | "256";
 
@@ -24,6 +25,14 @@ export interface FrameOptions {
   cursor?: { row: number; col: number };
   /** 挿入モード（状態行に出す） */
   insert?: boolean;
+  /** 画面表示の設定。省略時は素の見え方（ヘッダーなし。従来の描画と同じ） */
+  view?: TermView;
+  /** ホストの SBCS 表がカタカナ側（930/5026）か。表示コードの切替で読み直す向きを決める */
+  hostKatakana?: boolean;
+  /** ヘッダーの接頭キーの表記（`]` なら `Ctrl+]→`） */
+  prefix?: string;
+  /** ルーラーを引く位置（1 始まり）。`view.rule` が真のときだけ使う */
+  ruleAt?: { row: number; col: number };
 }
 
 export interface Frame {
@@ -55,12 +64,24 @@ const C256: Record<ScreenColor, string> = {
 };
 
 /** セルの SGR（先頭の `0;` で前のセルの属性を引き継がない）。同じ並びのセルは呼び出し側がまとめる */
-export function sgrOf(c: Cell, mode: ColorMode): string {
+export interface SgrExtra {
+  /** SO/SI マークを淡色で（`dim`） */
+  dim?: boolean;
+  /** ルーラーの帯（薄い背景色）。反転のセルには掛けない */
+  tint?: boolean;
+  /** 罫線の横罫を文字のあるセルへ重ねる（上線 SGR 53・下線 SGR 4） */
+  edge?: "top" | "bottom";
+}
+
+export function sgrOf(c: Cell, mode: ColorMode, extra: SgrExtra = {}): string {
   const p = ["0", (mode === "truecolor" ? TRUE : C256)[c.color]];
+  if (extra.dim) p.push("2");
   if (c.reverse) p.push("7");
   // 下線は DDS の指定（underline）。桁区切りだけのときは点線の下線（4:4）。両方なら実線を優先する
-  if (c.underline) p.push("4");
+  if (c.underline || extra.edge === "bottom") p.push("4");
   else if (c.columnSeparator) p.push("4:4");
+  if (extra.edge === "top") p.push("53");
+  if (extra.tint && !c.reverse) p.push(mode === "truecolor" ? "48;2;40;48;72" : "48;5;236");
   if (c.blink) p.push("5");
   return `\x1b[${p.join(";")}m`;
 }
@@ -75,7 +96,21 @@ function glyphOf(c: Cell): string {
 const isAscii = (ch: string): boolean => ch.charCodeAt(0) < 0x7f && ch >= " ";
 
 /** 画面 1 行を描く。`x0` は端末上の左端（1 始まり）、`maxCols` まで（超えた分は切る） */
-function rowOf(cells: readonly Cell[], termRow: number, maxCols: number, mode: ColorMode, grid?: Map<number, GridCell>): string {
+interface RowCtx {
+  /** 画面の行（1 始まり）。端末の行はヘッダーの分だけずれる */
+  screenRow: number;
+  termRow: number;
+  maxCols: number;
+  mode: ColorMode;
+  grid?: Map<number, GridCell>;
+  view: TermView;
+  sbcs: SbcsView;
+  ruleAt?: { row: number; col: number };
+}
+
+function rowOf(cells: readonly Cell[], x: RowCtx): string {
+  const { termRow, maxCols, mode, grid, view, sbcs } = x;
+  const rowTint = view.rule && x.ruleAt !== undefined && view.ruleStyle !== "vertical" && x.ruleAt.row === x.screenRow;
   let out = `\x1b[${termRow};1H`;
   let last = "";
   let col = 1;
@@ -84,16 +119,29 @@ function rowOf(cells: readonly Cell[], termRow: number, maxCols: number, mode: C
     cellNo++;
     let c = src;
     // DDS の罫線は、文字の無いセルにだけ罫線文字で描く（文字のあるセルは文字を優先）。窓の枠・見出しは背面の上に乗るので上書きする
-    const g = grid?.get(termRow * 1000 + cellNo);
+    const g = grid?.get(x.screenRow * 1000 + cellNo);
+    let edge: "top" | "bottom" | undefined;
     if (g && (g.force === true || ((c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay))) {
       const kind = g.half === "lead" ? "dbcs-lead" : g.half === "tail" ? "dbcs-tail" : "sbcs";
       c = { ...c, kind, char: g.ch, color: g.color, reverse: g.reverse === true, underline: false, columnSeparator: false, nonDisplay: false };
+    } else if (g && g.hEdge && g.mask !== undefined && (g.mask & 0b0101) === 0 && c.kind !== "attr" && !c.nonDisplay) {
+      // 文字のあるセルには縦罫も角も置けない。横罫だけは上線・下線で、文字を消さずに重ねる
+      edge = g.hEdge;
     }
+    let dim = false;
+    if (!c.nonDisplay && (c.kind === "so" || c.kind === "si") && view.sosi !== "none") {
+      c = { ...c, kind: "sbcs", char: c.kind === "so" ? "{" : "}" };
+      dim = view.sosi === "dim";
+    } else if (sbcs !== "host" && c.kind === "sbcs" && c.rawByte !== undefined) {
+      c = { ...c, char: recodeByte(c.rawByte, sbcs) };
+    }
+    if (!view.colSep && c.columnSeparator) c = { ...c, columnSeparator: false };
     // 右半分は lead が 2 桁ぶん進めてあるので、ここでは進めない（二重に数えると以降の桁が全角 1 字ごとに 1 桁ずれる）
     if (c.kind === "dbcs-tail") continue;
     const w = c.kind === "dbcs-lead" ? 2 : 1;
     if (col + w - 1 > maxCols) break; // 全角が端末の右端をまたぐなら描かない
-    const sg = sgrOf(c, mode);
+    const tint = rowTint || (view.rule && x.ruleAt !== undefined && view.ruleStyle !== "horizontal" && x.ruleAt.col === cellNo);
+    const sg = sgrOf(c, mode, { ...(dim ? { dim } : {}), ...(tint ? { tint } : {}), ...(edge ? { edge } : {}) });
     if (sg !== last) {
       out += sg;
       last = sg;
@@ -120,27 +168,49 @@ function statusOf(snap: ScreenSnapshot, cursor: { row: number; col: number }, no
 
 export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
   const { cols, rows } = opts.viewport;
-  const screenRows = Math.max(0, Math.min(snap.rows, rows - 1));
+  const view = opts.view ?? PLAIN_VIEW;
+  // ヘッダーは画面 + 状態行に加えて 1 行の余白があるときだけ出す（足りなければ画面を優先する）
+  const top = view.header && rows >= snap.rows + 2 ? 1 : 0;
+  const screenRows = Math.max(0, Math.min(snap.rows, rows - 1 - top));
   const out: string[] = [];
-  const grid = gridOverlay(snap);
-  for (let r = 0; r < screenRows; r++) out.push(rowOf(snap.cells[r]!, r + 1, cols, opts.colorMode, grid));
+  if (top === 1) out.push(`\x1b[1;1H\x1b[0;30;46m${fitText(` ${headerText(view, opts.prefix ?? "]")}`, cols)}\x1b[K${RESET}`);
+  const grid = view.grid ? gridOverlay(snap) : undefined;
+  const sbcs = resolveSbcsView(view.kana, opts.hostKatakana === true);
+  for (let r = 0; r < screenRows; r++) {
+    out.push(
+      rowOf(snap.cells[r]!, {
+        screenRow: r + 1,
+        termRow: r + 1 + top,
+        maxCols: cols,
+        mode: opts.colorMode,
+        ...(grid ? { grid } : {}),
+        view,
+        sbcs,
+        ...(opts.ruleAt ? { ruleAt: opts.ruleAt } : {})
+      })
+    );
+  }
   const cursor = opts.cursor ?? snap.cursor;
   if (rows >= 1) {
     const small = cols < snap.cols || rows < snap.rows + 1 ? `端末が小さい（${snap.cols}x${snap.rows + 1} が要る）` : undefined;
     const text = statusOf(snap, cursor, small ?? opts.note, opts.insert === true);
-    // 状態行は端末の最終行。切り詰めは文字数で行う（全角は 2 桁数える）
-    let w = 0;
-    let s = "";
-    for (const ch of text) {
-      const cw = ch.codePointAt(0)! > 0x2e7f ? 2 : 1;
-      if (w + cw > cols - 1) break;
-      s += ch;
-      w += cw;
-    }
-    out.push(`\x1b[${rows};1H\x1b[0;7m ${s}\x1b[K${RESET}`);
+    out.push(`\x1b[${rows};1H\x1b[0;7m ${fitText(text, cols - 1)}\x1b[K${RESET}`);
   }
   const visible = cursor.row <= screenRows && cursor.col <= cols;
-  return { rows: out, cursor: visible ? { row: cursor.row, col: cursor.col } : undefined };
+  return { rows: out, cursor: visible ? { row: cursor.row + top, col: cursor.col } : undefined };
+}
+
+/** 切り詰めは文字数で行う（全角は 2 桁数える） */
+function fitText(text: string, width: number): string {
+  let w = 0;
+  let s = "";
+  for (const ch of text) {
+    const cw = ch.codePointAt(0)! > 0x2e7f ? 2 : 1;
+    if (w + cw > width) break;
+    s += ch;
+    w += cw;
+  }
+  return s;
 }
 
 /**

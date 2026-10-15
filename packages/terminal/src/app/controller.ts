@@ -7,12 +7,15 @@
  *
  * 5250 の専用キーは文字端末に無いものがある（research F9b）。**接頭キーの次の 1 文字**で割り当てる:
  *   a Attn / s SysReq / h Help / p Print / c Clear / r Reset / e Field Exit / i 挿入切替 / 1 2 3 PA1〜PA3 / q 終了
+ * 画面表示の切替（`view.ts`）も同じ接頭キーで行う:
+ *   g 罫線 / o SO/SI / k カナ・英 / u カーソルの形 / b 明滅 / l ルーラー / m ルーラーの形 / f ルーラーの固定 / v 桁区切り / w パネル
  */
 import type { AidKey, Field, ScreenSnapshot, SendAidOptions } from "@ts5250/tn5250";
 import { typeInto, deleteAt, backspaceAt, exitAt, MSG_FIELD_EXIT_KEY, type EditEnv, type EditOutcome } from "./editing.js";
 import { offsetOfPos } from "@ts5250/tn5250/edit/fieldSlices";
 import { isTabStopField } from "@ts5250/tn5250/edit/continuedRun";
 import type { KeyEvent } from "../input/decode.js";
+import { DEFAULT_VIEW, toggleView, viewNote, type TermView } from "./view.js";
 
 export interface SessionLike {
   snapshot(): ScreenSnapshot;
@@ -27,6 +30,8 @@ export interface ControllerOptions {
   prefix?: string;
   /** DBCS の CCSID でないセッションか（幅の検査を SBCS 向けにする） */
   sbcsOnly?: boolean;
+  /** 画面表示の初期設定（省略時は `DEFAULT_VIEW`） */
+  view?: TermView;
 }
 
 export const PREFIX_DEFAULT = "]";
@@ -53,11 +58,16 @@ export class TerminalController {
   private readonly jeErased = new Set<number>();
   /** 自分の `setField` が起こす screen 事象で、カーソルをホストの位置へ戻さないための印 */
   private local = 0;
-  private readonly prefix: string;
+  readonly prefix: string;
+  /** 画面表示の設定。切替は接頭キーの次の文字（`toggleView`） */
+  view: TermView;
+  /** ルーラーを固定にしたときの位置（出した時点のカーソル。web-ui の `ruleAnchor` と同じ規則） */
+  private ruleAnchor: { row: number; col: number } | undefined;
 
   constructor(private readonly session: SessionLike, opts: ControllerOptions = {}) {
     this.prefix = opts.prefix ?? PREFIX_DEFAULT;
     this.sbcsOnly = opts.sbcsOnly ?? true;
+    this.view = opts.view ?? DEFAULT_VIEW;
     this.cursor = { ...session.snapshot().cursor };
   }
 
@@ -80,7 +90,7 @@ export class TerminalController {
     if (ev.kind === "char") {
       if (ev.ctrl && ev.ch === this.prefix) {
         this.prefixed = true;
-        this.note = `接頭キー: a=Attn s=SysReq h=Help p=Print c=Clear r=Reset e=FieldExit i=挿入 1-3=PA q=終了`;
+        this.note = `接頭キー: a=Attn s=SysReq h=Help p=Print c=Clear r=Reset e=FieldExit i=挿入 1-3=PA q=終了 / 表示 g o k u b l m f v w`;
         return;
       }
       if (ev.ctrl && ev.ch === "c") {
@@ -129,7 +139,28 @@ export class TerminalController {
     }
     const aid = PREFIXED[ch];
     if (aid) return this.aid(aid, snap);
+    const v = toggleView(this.view, ch);
+    if (v) {
+      this.setView(v, ch, snap);
+      return;
+    }
     this.note = `接頭キーの割り当てが無い: ${ch}`;
+  }
+
+  /** ルーラーを引く位置。従わない設定なら固定した位置（画面が縮んでも画面の中に収める） */
+  ruleAt(snap: ScreenSnapshot = this.session.snapshot()): { row: number; col: number } {
+    const a = this.view.ruleFollow ? undefined : this.ruleAnchor;
+    if (!a) return this.cursor;
+    return { row: Math.min(a.row, snap.rows), col: Math.min(a.col, snap.cols) };
+  }
+
+  private setView(v: TermView, key: string, snap: ScreenSnapshot): void {
+    // 従う→固定、またはルーラーを出す時に固定なら、この時点のカーソルで固める。従うへ戻したら解く
+    if (v.ruleFollow) this.ruleAnchor = undefined;
+    else if (!this.ruleAnchor || (!this.view.rule && v.rule) || this.view.ruleFollow) this.ruleAnchor = { ...this.cursor };
+    this.view = v;
+    void snap;
+    this.note = viewNote(v, key);
   }
 
   private async aid(key: AidKey, snap: ScreenSnapshot): Promise<void> {

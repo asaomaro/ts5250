@@ -8,6 +8,7 @@
  */
 import { readFileSync } from "node:fs";
 import { Session5250, ReplayTransport, parseTraceJsonl, isDbcsCcsid } from "@ts5250/tn5250";
+import { isKatakanaCcsid } from "@ts5250/ebcdic/katakana";
 import { PREFIX_DEFAULT } from "../app/controller.js";
 import { runTerminal } from "./run.js";
 import { WsSession } from "./ws-session.js";
@@ -18,6 +19,7 @@ const USAGE = `使い方: ts5250-term --host <ホスト> [--port N] [--tls] [--c
       ts5250-term --replay <記録.jsonl> [--ccsid N]   （記録の再生。ホスト不要。画面確認・試験用）
   操作: 矢印=移動 Tab/Shift+Tab=欄移動 Enter・F1〜F12・Shift+F1〜F12(=F13〜F24)・PageUp/Down=AID
         Esc=リセット  Ctrl+${PREFIX_DEFAULT} の次: a=Attn s=SysReq h=Help p=Print c=Clear r=Reset e=FieldExit i=挿入 1-3=PA q=終了
+        表示の切替（上部のパネルに現在値）: g=罫線 o=SO/SI k=カナ/英 u=カーソルの形 b=明滅 l=ルーラー m=ルーラーの形 f=固定 v=桁区切り w=パネル
   編集: 文字欄と O 欄（SO/SI 補完）。Insert または接頭キーの i で挿入。継続・語送り・J・E・G 欄は未対応`;
 
 function arg(name: string): string | undefined {
@@ -61,7 +63,7 @@ async function main(): Promise<void> {
     });
     runTerminal(
       { session: ws, onScreen: (cb) => ws.onScreen(cb), onClosed: (cb) => ws.onClosed(cb) },
-      { prefix: arg("prefix") ?? PREFIX_DEFAULT, sbcsOnly: !isDbcsCcsid(ws.ccsid) }
+      { prefix: arg("prefix") ?? PREFIX_DEFAULT, sbcsOnly: !isDbcsCcsid(ws.ccsid), hostKatakana: isKatakanaCcsid(ws.ccsid) }
     );
     return;
   }
@@ -91,7 +93,7 @@ async function main(): Promise<void> {
       onScreen: (cb) => void session.on("screen", cb),
       onClosed: (cb) => void session.on("closed", cb)
     },
-    { prefix: arg("prefix") ?? PREFIX_DEFAULT, sbcsOnly: !isDbcsCcsid(session.ccsid) }
+    { prefix: arg("prefix") ?? PREFIX_DEFAULT, sbcsOnly: !isDbcsCcsid(session.ccsid), hostKatakana: isKatakanaCcsid(session.ccsid) }
   );
 }
 
