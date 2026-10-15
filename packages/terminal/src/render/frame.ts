@@ -70,7 +70,7 @@ export interface SgrExtra {
   /** ルーラーの帯（薄い背景色）。反転のセルには掛けない */
   tint?: boolean;
   /** 罫線の横罫を文字のあるセルへ重ねる（上線 SGR 53・下線 SGR 4） */
-  edge?: "top" | "bottom";
+  edge?: "top" | "bottom" | "both";
 }
 
 export function sgrOf(c: Cell, mode: ColorMode, extra: SgrExtra = {}): string {
@@ -78,9 +78,9 @@ export function sgrOf(c: Cell, mode: ColorMode, extra: SgrExtra = {}): string {
   if (extra.dim) p.push("2");
   if (c.reverse) p.push("7");
   // 下線は DDS の指定（underline）。桁区切りだけのときは点線の下線（4:4）。両方なら実線を優先する
-  if (c.underline || extra.edge === "bottom") p.push("4");
+  if (c.underline || extra.edge === "bottom" || extra.edge === "both") p.push("4");
   else if (c.columnSeparator) p.push("4:4");
-  if (extra.edge === "top") p.push("53");
+  if (extra.edge === "top" || extra.edge === "both") p.push("53");
   if (extra.tint && !c.reverse) p.push(mode === "truecolor" ? "48;2;40;48;72" : "48;5;236");
   if (c.blink) p.push("5");
   return `\x1b[${p.join(";")}m`;
@@ -106,13 +106,21 @@ interface RowCtx {
   view: TermView;
   sbcs: SbcsView;
   ruleAt?: { row: number; col: number };
+  /** この行に文字（空白以外）があるか */
+  hasText: boolean;
+  /** 下の行の上辺の横罫を、この行の下線として引くセル（キーは `row * 1000 + col`） */
+  under: ReadonlySet<number>;
 }
+
+const hasTextIn = (cells: readonly Cell[]): boolean =>
+  cells.some((c) => (c.kind === "sbcs" || c.kind === "dbcs-lead") && !c.nonDisplay && c.char !== "" && c.char !== " ");
 
 function rowOf(cells: readonly Cell[], x: RowCtx): string {
   const { termRow, maxCols, mode, grid, view, sbcs } = x;
   const rowTint = view.rule && x.ruleAt !== undefined && view.ruleStyle !== "vertical" && x.ruleAt.row === x.screenRow;
-  // 文字のある行では横罫を行の縁（上線・下線）に引く。罫線文字（─）は行の中ほどを通り、文字と同じ行に線が走って見える
-  const rowHasText = cells.some((c) => (c.kind === "sbcs" || c.kind === "dbcs-lead") && !c.nonDisplay && c.char !== "" && c.char !== " ");
+  // 文字のある行では横罫を行の縁に引く（罫線文字 ─ は行の中ほどを通り、文字と同じ行に線が走って見える）。
+  // 上辺の横罫は上の行の下線で引く（下線は端末が一様に対応する。上線 SGR 53 は先頭行など行が無いときだけ）
+  const rowHasText = x.hasText;
   let out = `\x1b[${termRow};1H`;
   let last = "";
   let col = 1;
@@ -122,11 +130,13 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
     let c = src;
     // DDS の罫線は、文字の無いセルにだけ罫線文字で描く（文字のあるセルは文字を優先）。窓の枠・見出しは背面の上に乗るので上書きする
     const g = grid?.get(x.screenRow * 1000 + cellNo);
-    let edge: "top" | "bottom" | undefined;
+    let edge: "top" | "bottom" | "both" | undefined;
     const hOnly = g !== undefined && g.hEdge !== undefined && g.mask !== undefined && (g.mask & 0b0101) === 0;
     if (g && hOnly && rowHasText && g.force !== true && !c.nonDisplay) {
-      // 縁の線は空白のセルにも掛ける（下線・上線は空白でも引かれる）。縦罫・角・交点は縁に置けないので下の分岐へ
-      edge = g.hEdge;
+      // 縁の線は空白のセルにも掛ける（下線は空白でも引かれる）。縦罫・角・交点は縁に置けないので下の分岐へ。
+      // 上辺は上の行の下線が引くので、ここでは何もしない（先頭行だけ上線）
+      if (g.hEdge === "bottom") edge = "bottom";
+      else if (x.screenRow === 1) edge = "top";
     } else if (g && (g.force === true || ((c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay))) {
       const kind = g.half === "lead" ? "dbcs-lead" : g.half === "tail" ? "dbcs-tail" : "sbcs";
       c = { ...c, kind, char: g.ch, color: g.color, reverse: g.reverse === true, underline: false, columnSeparator: false, nonDisplay: false };
@@ -134,6 +144,7 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
       // 文字のあるセルには縦罫も角も置けない。横罫だけは上線・下線で、文字を消さずに重ねる
       edge = g.hEdge;
     }
+    if (x.under.has(x.screenRow * 1000 + cellNo) && !c.nonDisplay) edge = edge === "top" ? "both" : "bottom";
     let dim = false;
     if (!c.nonDisplay && (c.kind === "so" || c.kind === "si") && view.sosi !== "none") {
       c = { ...c, kind: "sbcs", char: c.kind === "so" ? "{" : "}" };
@@ -182,6 +193,16 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
   if (top === 1) out.push(`\x1b[1;1H\x1b[0;30;46m${fitText(` ${headerText(view, opts.prefix ?? "]")}`, cols)}\x1b[K${RESET}`);
   const grid = view.grid ? gridOverlay(snap) : undefined;
   const sbcs = resolveSbcsView(view.kana, opts.hostKatakana === true);
+  const texty = snap.cells.map(hasTextIn);
+  const under = new Set<number>();
+  if (grid) {
+    for (const [k, g] of grid) {
+      const r = Math.floor(k / 1000);
+      if (g.hEdge === "top" && g.force !== true && g.mask !== undefined && (g.mask & 0b0101) === 0 && r > 1 && texty[r - 1] === true) {
+        under.add((r - 1) * 1000 + (k % 1000));
+      }
+    }
+  }
   for (let r = 0; r < screenRows; r++) {
     out.push(
       rowOf(snap.cells[r]!, {
@@ -192,6 +213,8 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
         ...(grid ? { grid } : {}),
         view,
         sbcs,
+        hasText: texty[r] === true,
+        under,
         ...(opts.ruleAt ? { ruleAt: opts.ruleAt } : {})
       })
     );

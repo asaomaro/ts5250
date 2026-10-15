@@ -30,14 +30,16 @@ describe("画面表示の設定", () => {
     expect(plain(off.rows[2]!)).not.toContain("┌");
   });
 
-  it("文字のあるセルの横罫は上線・下線で重ね、文字は消えない", async () => {
+  it("文字のある行の横罫は罫線文字にせず、上辺は上の行の下線・下辺は自行の下線で引く", async () => {
     const snap = box(await blank());
     snap.cells[2]![6] = { ...snap.cells[2]![6]!, char: "X" };
     snap.cells[4]![6] = { ...snap.cells[4]![6]!, char: "Y" };
     const f = renderFrame(snap, { viewport: VP, colorMode: "truecolor", view: { ...DEFAULT_VIEW, header: false } });
     // 文字のある行では横罫を罫線文字にせず、空白のセルにも上線を引く（文字と同じ行の中ほどに線を走らせない）
     expect(plain(f.rows[2]!).slice(4, 10)).toBe("┌ X  ┐");
-    expect(f.rows[2]!).toMatch(/;53m X  \x1b/);
+    // 上辺は上の行（2 行目）の下線で引く。上線（SGR 53）は使わない
+    expect(f.rows[2]!).not.toContain(";53");
+    expect(f.rows[1]!).toMatch(/;4m {4}\x1b/);
     expect(f.rows[4]!).toMatch(/;4m[^\x1b]*Y/);
   });
 
