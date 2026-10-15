@@ -41,8 +41,8 @@ describe("画面表示の設定", () => {
     expect(plain(f.rows[2]!).slice(4, 10)).toBe("│ X  │");
     // 上辺は上の行（2 行目）の下線で引く。上線（SGR 53）は使わない
     expect(f.rows[2]!).not.toContain(";53");
-    expect(f.rows[1]!).toMatch(/;4m {4}\x1b/);
-    expect(f.rows[4]!).toMatch(/;4m[^\x1b]*Y/);
+    expect(f.rows[1]!).toMatch(/;4;58:2::\d+:\d+:\d+m {4}\x1b/);
+    expect(f.rows[4]!).toMatch(/;4;58:2::[^m]*m[^\x1b]*Y/);
   });
 
   it("上辺の横罫は既定ではその行の上線で引き、上の行に下線を付けない", async () => {
@@ -70,6 +70,16 @@ describe("画面表示の設定", () => {
     expect(f.rows[3]!).toMatch(/;53m/); // 横の腕は上線
     expect(plain(f.rows[4]!)).not.toMatch(/[┼├┤┬┴┌┐└┘─]/); // 文字の無い行も同じ
     expect(f.rows[4]!).toMatch(/;53m/);
+  });
+
+  it("横罫の色はホストの指定に合わせる（下線は SGR 58、空白の上線は文字色）", async () => {
+    const snap = box(await blank()); // color: 0x01 は GRID_COLOR で青
+    snap.cells[4]![6] = { ...snap.cells[4]![6]!, char: "Y" };
+    const f = renderFrame(snap, { viewport: VP, colorMode: "truecolor", view: { ...DEFAULT_VIEW, header: false } });
+    expect(f.rows[4]!).toMatch(/;4;58:2::90:120:255m/); // 下辺の下線の色
+    expect(f.rows[2]!).toMatch(/38;2;90;120;255;53m/); // 上辺の上線（空白の文字色が線の色）
+    const under = renderFrame(snap, { viewport: VP, colorMode: "256", view: { ...DEFAULT_VIEW, header: false, hrule: "under" } });
+    expect(under.rows[1]!).toMatch(/58:5:69/);
   });
 
   it("SO/SI は設定に応じて { } を出す（薄目は淡色）", async () => {

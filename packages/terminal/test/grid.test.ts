@@ -26,7 +26,7 @@ describe("DDS の罫線（グリッド罫線）", () => {
     expect(f.rows[2]!).toContain(";53m");
     expect(rows[3]!.slice(4, 10)).toBe("│    │");
     expect(rows[4]!.slice(4, 10)).toBe("│    │");
-    expect(f.rows[4]!).toContain(";4m");
+    expect(f.rows[4]!).toMatch(/;4;58:2::/);
   });
 
   it("文字のあるセルは文字を優先する", async () => {

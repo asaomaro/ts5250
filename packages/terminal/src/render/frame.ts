@@ -71,6 +71,8 @@ export interface SgrExtra {
   tint?: boolean;
   /** 罫線の横罫を文字のあるセルへ重ねる（上線 SGR 53・下線 SGR 4） */
   edge?: "top" | "bottom" | "both";
+  /** 下線の色（SGR 58）。ホストが罫線に指定した色。上線には色の指定が無く文字色になる */
+  lineColor?: ScreenColor;
 }
 
 export function sgrOf(c: Cell, mode: ColorMode, extra: SgrExtra = {}): string {
@@ -81,6 +83,12 @@ export function sgrOf(c: Cell, mode: ColorMode, extra: SgrExtra = {}): string {
   if (c.underline || extra.edge === "bottom" || extra.edge === "both") p.push("4");
   else if (c.columnSeparator) p.push("4:4");
   if (extra.edge === "top" || extra.edge === "both") p.push("53");
+  // 下線の色は colon 形式（58:2::R:G:B）で渡す。非対応の端末は 1 つの未知の指定として読み飛ばす
+  // （セミコロン形式だと後続の数が別の属性として解釈される）
+  if (extra.lineColor && (extra.edge === "bottom" || extra.edge === "both")) {
+    const t = (mode === "truecolor" ? TRUE : C256)[extra.lineColor];
+    p.push(t.replace(/^38;2;(\d+);(\d+);(\d+)$/, "58:2::$1:$2:$3").replace(/^38;5;(\d+)$/, "58:5:$1"));
+  }
   if (extra.tint && !c.reverse) p.push(mode === "truecolor" ? "48;2;40;48;72" : "48;5;236");
   if (c.blink) p.push("5");
   return `\x1b[${p.join(";")}m`;
@@ -109,7 +117,7 @@ interface RowCtx {
   /** 横罫を行の縁の線（上線・下線）で引くか。偽なら罫線文字（─ ┼ …）を行の中ほどに置く */
   hasText: boolean;
   /** 下の行の上辺の横罫を、この行の下線として引くセル（キーは `row * 1000 + col`） */
-  under: ReadonlySet<number>;
+  under: ReadonlyMap<number, ScreenColor>;
 }
 
 function rowOf(cells: readonly Cell[], x: RowCtx): string {
@@ -149,7 +157,18 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
       // 文字のあるセルには縦罫も角も置けない。横罫だけは上線・下線で、文字を消さずに重ねる
       edge = g.hEdge;
     }
-    if (x.under.has(x.screenRow * 1000 + cellNo) && !c.nonDisplay) edge = edge === "top" ? "both" : "bottom";
+    // 線の色はホストの指定に合わせる。上線は色の指定が無く文字色になるので、空白のセルは文字色を線の色にする
+    // （文字のあるセルは文字を優先して文字色のまま）。下線は SGR 58 で色を渡す
+    let lineColor: ScreenColor | undefined;
+    if (g && (edge === "top" || edge === "both") && (c.char === " " || c.char === "" || c.kind === "attr") && !c.nonDisplay) {
+      c = { ...c, color: g.color };
+    }
+    if (g && (edge === "bottom" || edge === "both")) lineColor = g.color;
+    const below = x.under.get(x.screenRow * 1000 + cellNo);
+    if (below !== undefined && !c.nonDisplay) {
+      edge = edge === "top" ? "both" : "bottom";
+      lineColor = below;
+    }
     let dim = false;
     if (!c.nonDisplay && (c.kind === "so" || c.kind === "si") && view.sosi !== "none") {
       c = { ...c, kind: "sbcs", char: c.kind === "so" ? "{" : "}" };
@@ -163,7 +182,7 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
     const w = c.kind === "dbcs-lead" ? 2 : 1;
     if (col + w - 1 > maxCols) break; // 全角が端末の右端をまたぐなら描かない
     const tint = rowTint || (view.rule && x.ruleAt !== undefined && view.ruleStyle !== "horizontal" && x.ruleAt.col === cellNo);
-    const sg = sgrOf(c, mode, { ...(dim ? { dim } : {}), ...(tint ? { tint } : {}), ...(edge ? { edge } : {}) });
+    const sg = sgrOf(c, mode, { ...(dim ? { dim } : {}), ...(tint ? { tint } : {}), ...(edge ? { edge } : {}), ...(lineColor ? { lineColor } : {}) });
     if (sg !== last) {
       out += sg;
       last = sg;
@@ -198,12 +217,12 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
   if (top === 1) out.push(`\x1b[1;1H\x1b[0;30;46m${fitText(` ${headerText(view, opts.prefix ?? "]")}`, cols)}\x1b[K${RESET}`);
   const grid = view.grid ? gridOverlay(snap) : undefined;
   const sbcs = resolveSbcsView(view.kana, opts.hostKatakana === true);
-  const under = new Set<number>();
+  const under = new Map<number, ScreenColor>();
   if (grid) {
     for (const [k, g] of grid) {
       const r = Math.floor(k / 1000);
       if (view.hrule === "under" && g.hEdge === "top" && g.force !== true && g.mask !== undefined && (g.mask & 0b0101) === 0 && r > 1) {
-        under.add((r - 1) * 1000 + (k % 1000));
+        under.set((r - 1) * 1000 + (k % 1000), g.color);
       }
     }
   }
