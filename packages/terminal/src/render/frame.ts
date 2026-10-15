@@ -134,9 +134,9 @@ function rowOf(cells: readonly Cell[], x: RowCtx): string {
     const hOnly = g !== undefined && g.hEdge !== undefined && g.mask !== undefined && (g.mask & 0b0101) === 0;
     if (g && hOnly && rowHasText && g.force !== true && !c.nonDisplay) {
       // 縁の線は空白のセルにも掛ける（下線は空白でも引かれる）。縦罫・角・交点は縁に置けないので下の分岐へ。
-      // 上辺は上の行の下線が引くので、ここでは何もしない（先頭行だけ上線）
+      // 上辺は、上線の設定ならこの行の上線、下線の設定なら上の行の下線が引く（先頭行だけは上線）
       if (g.hEdge === "bottom") edge = "bottom";
-      else if (x.screenRow === 1) edge = "top";
+      else if (view.hrule === "over" || x.screenRow === 1) edge = "top";
     } else if (g && (g.force === true || ((c.kind === "sbcs" || c.kind === "attr") && (c.char === " " || c.char === "") && !c.nonDisplay))) {
       const kind = g.half === "lead" ? "dbcs-lead" : g.half === "tail" ? "dbcs-tail" : "sbcs";
       c = { ...c, kind, char: g.ch, color: g.color, reverse: g.reverse === true, underline: false, columnSeparator: false, nonDisplay: false };
@@ -198,7 +198,7 @@ export function renderFrame(snap: ScreenSnapshot, opts: FrameOptions): Frame {
   if (grid) {
     for (const [k, g] of grid) {
       const r = Math.floor(k / 1000);
-      if (g.hEdge === "top" && g.force !== true && g.mask !== undefined && (g.mask & 0b0101) === 0 && r > 1 && texty[r - 1] === true) {
+      if (view.hrule === "under" && g.hEdge === "top" && g.force !== true && g.mask !== undefined && (g.mask & 0b0101) === 0 && r > 1 && texty[r - 1] === true) {
         under.add((r - 1) * 1000 + (k % 1000));
       }
     }

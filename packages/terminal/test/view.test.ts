@@ -34,13 +34,22 @@ describe("画面表示の設定", () => {
     const snap = box(await blank());
     snap.cells[2]![6] = { ...snap.cells[2]![6]!, char: "X" };
     snap.cells[4]![6] = { ...snap.cells[4]![6]!, char: "Y" };
-    const f = renderFrame(snap, { viewport: VP, colorMode: "truecolor", view: { ...DEFAULT_VIEW, header: false } });
+    const f = renderFrame(snap, { viewport: VP, colorMode: "truecolor", view: { ...DEFAULT_VIEW, header: false, hrule: "under" } });
     // 文字のある行では横罫を罫線文字にせず、空白のセルにも上線を引く（文字と同じ行の中ほどに線を走らせない）
     expect(plain(f.rows[2]!).slice(4, 10)).toBe("┌ X  ┐");
     // 上辺は上の行（2 行目）の下線で引く。上線（SGR 53）は使わない
     expect(f.rows[2]!).not.toContain(";53");
     expect(f.rows[1]!).toMatch(/;4m {4}\x1b/);
     expect(f.rows[4]!).toMatch(/;4m[^\x1b]*Y/);
+  });
+
+  it("上辺の横罫は既定ではその行の上線で引き、上の行に下線を付けない", async () => {
+    const snap = box(await blank());
+    snap.cells[2]![6] = { ...snap.cells[2]![6]!, char: "X" };
+    const f = renderFrame(snap, { viewport: VP, colorMode: "truecolor", view: { ...DEFAULT_VIEW, header: false } });
+    expect(plain(f.rows[2]!).slice(4, 10)).toBe("┌ X  ┐");
+    expect(f.rows[2]!).toMatch(/;53m X  \x1b/);
+    expect(f.rows[1]!).not.toMatch(/;4m/);
   });
 
   it("SO/SI は設定に応じて { } を出す（薄目は淡色）", async () => {

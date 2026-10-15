@@ -3,7 +3,7 @@
  * **純ロジック**（Node API 非依存）。描画は `render/frame.ts`、切替は `controller.ts`、ヘッダーの操作パネルの文言はここ。
  *
  * 取り込んだ項目と、端末での見せ方（web-ui との差）:
- * - 罫線（DDS のグリッド罫線）の表示・非表示。文字のあるセルの横罫は上線・下線で重ねる（縦罫は重ねられない）
+ * - 罫線（DDS のグリッド罫線）の表示・非表示。文字のある行の横罫は上線・下線で引く（縦罫は重ねられない）。上辺は上線か上の行の下線を選ぶ
  * - SO/SI の表示（非表示・薄目・濃目）。薄目は SGR 2（淡色）、濃目は桁の色のまま
  * - 表示コード（カナ⇄英）。ホストの SBCS 表を読み直す規則は web-ui の `resolveSbcsView` と同じ
  * - カーソルの形（ブロック・下線）と明滅。DECSCUSR で端末のカーソルそのものを変える（挿入中は下線——ACS と同じ）
@@ -21,6 +21,11 @@ export type RuleStyle = "crosshair" | "horizontal" | "vertical";
 export interface TermView {
   /** DDS のグリッド罫線・窓の枠を描くか */
   grid: boolean;
+  /**
+   * 文字のある行の上辺の横罫を、その行の上線（SGR 53）で引くか、上の行の下線（SGR 4）で引くか。
+   * 上線は Windows Terminal で描かれることを実機で確かめた（20261015）。上線に対応しない端末では `under` を選ぶ
+   */
+  hrule: "over" | "under";
   sosi: SosiMode;
   kana: KanaMode;
   cursorShape: CursorShape;
@@ -39,6 +44,7 @@ export interface TermView {
 /** 起動時の既定。web-ui の既定（罫線 ON・SO/SI 非表示・表示コード auto・ブロック・明滅 ON・ルーラー OFF）に合わせる */
 export const DEFAULT_VIEW: TermView = {
   grid: true,
+  hrule: "over",
   sosi: "none",
   kana: "auto",
   cursorShape: "block",
@@ -63,6 +69,7 @@ export const RULE_STYLE_ORDER: readonly RuleStyle[] = ["crosshair", "horizontal"
 export function toggleView(v: TermView, key: string): TermView | null {
   switch (key) {
     case "g": return { ...v, grid: !v.grid };
+    case "t": return { ...v, hrule: v.hrule === "over" ? "under" : "over" };
     case "o": return { ...v, sosi: next(SOSI_ORDER, v.sosi) };
     case "k": return { ...v, kana: next(KANA_ORDER, v.kana) };
     case "u": return { ...v, cursorShape: v.cursorShape === "block" ? "underline" : "block" };
@@ -112,6 +119,7 @@ export function headerText(v: TermView, prefix: string): string {
   return [
     `Ctrl+${prefix}→`,
     `g罫線:${onOff(v.grid)}`,
+    `t上辺:${v.hrule === "over" ? "上線" : "下線"}`,
     `oSO/SI:${SOSI_LABEL[v.sosi]}`,
     `kカナ:${KANA_LABEL[v.kana]}`,
     `uカーソル:${v.cursorShape === "block" ? "■" : "_"}`,
@@ -127,6 +135,7 @@ export function headerText(v: TermView, prefix: string): string {
 export function viewNote(v: TermView, key: string): string {
   switch (key) {
     case "g": return `罫線: ${onOff(v.grid)}`;
+    case "t": return `罫線の上辺: ${v.hrule === "over" ? "その行の上線" : "上の行の下線"}`;
     case "o": return `SO/SI 表示: ${SOSI_LABEL[v.sosi]}`;
     case "k": return `表示コード: ${KANA_LABEL[v.kana]}`;
     case "u": return `カーソル: ${v.cursorShape === "block" ? "ブロック" : "下線"}`;
