@@ -50,12 +50,12 @@ const SIBLINGS: readonly (readonly [string, string])[] = [
   ["vt", "tn3270"],
   ["vt", "scs"],
   ["vt", "ebcdic"],
-  // terminal は 5250 の文字端末の前面。tn5250 と base だけを使う（ホストサーバー・他の端末種別・EBCDIC・SCS には触れない）
+  // terminal は 5250 の文字端末の前面。tn5250・base と、表示コード切替の SBCS 表（ebcdic/katakana）だけを使う
+  // （ホストサーバー・他の端末種別・SCS には触れない。ebcdic は web-ui と同じく表示コードの読み直しに要る）
   ["terminal", "hostserver"],
   ["terminal", "tn3270"],
   ["terminal", "vt"],
-  ["terminal", "scs"],
-  ["terminal", "ebcdic"]
+  ["terminal", "scs"]
 ];
 
 function collect(dir: string): string[] {

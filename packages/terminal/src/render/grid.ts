@@ -52,6 +52,10 @@ export interface GridCell {
   force?: boolean;
   /** 全角の字の左半分／右半分 */
   half?: "lead" | "tail";
+  /** 腕の組（N=1 E=2 S=4 W=8）。文字のあるセルへ横線だけを重ねるか決めるのに使う */
+  mask?: number;
+  /** 横罫のとき、線がそのセルの上辺か下辺か（文字のあるセルは上線・下線で表す） */
+  hEdge?: "top" | "bottom";
 }
 
 /** 罫線の置き場。キーは `row * 1000 + col`（1 始まり）。空なら `undefined` */
@@ -59,21 +63,27 @@ export function gridOverlay(snap: ScreenSnapshot): Map<number, GridCell> | undef
   const lines = snap.gui?.gridLines ?? [];
   const windows = snap.gui?.windows ?? [];
   if (lines.length === 0 && windows.length === 0) return undefined;
-  const acc = new Map<number, { mask: number; style: Style; color: ScreenColor }>();
-  const add = (row: number, col: number, bits: number, style: Style, color: ScreenColor): void => {
+  const acc = new Map<number, { mask: number; style: Style; color: ScreenColor; hEdge?: "top" | "bottom" }>();
+  const add: Add = (row, col, bits, style, color, hEdge) => {
     if (row < 1 || col < 1 || row > snap.rows || col > snap.cols) return;
     const k = row * 1000 + col;
     const cur = acc.get(k);
-    acc.set(k, { mask: (cur?.mask ?? 0) | bits, style: cur ? cur.style : style, color: cur ? cur.color : color });
+    const edge = cur?.hEdge ?? hEdge;
+    acc.set(k, {
+      mask: (cur?.mask ?? 0) | bits,
+      style: cur ? cur.style : style,
+      color: cur ? cur.color : color,
+      ...(edge ? { hEdge: edge } : {})
+    });
   };
   for (const g of lines) segmentsOf(g, add);
   const out = new Map<number, GridCell>();
-  for (const [k, v] of acc) out.set(k, { ch: glyph(v.mask, v.style), color: v.color });
+  for (const [k, v] of acc) out.set(k, { ch: glyph(v.mask, v.style), color: v.color, mask: v.mask, ...(v.hEdge ? { hEdge: v.hEdge } : {}) });
   for (const w of windows) windowCells(w, snap, out);
   return out.size > 0 ? out : undefined;
 }
 
-type Add = (row: number, col: number, bits: number, style: Style, color: ScreenColor) => void;
+type Add = (row: number, col: number, bits: number, style: Style, color: ScreenColor, hEdge?: "top" | "bottom") => void;
 
 function segmentsOf(g: GuiGridLine, add: Add): void {
   const style = styleOf(g.lineStyle);
@@ -105,7 +115,7 @@ function segmentsOf(g: GuiGridLine, add: Add): void {
     for (const [x, y] of cut(left, right, owner, false)) {
       for (let c = x + 1; c <= y; c++) {
         const bits = x + 1 === y ? E | W : c === x + 1 ? E : c === y ? W : E | W;
-        add(owner, c, bits, style, color);
+        add(owner, c, bits, style, color, ownerBelow ? "top" : "bottom");
       }
     }
   };

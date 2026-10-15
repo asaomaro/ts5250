@@ -6,6 +6,7 @@ import { renderFrame, paintDiff, type ColorMode } from "../render/frame.js";
 import { KeyDecoder } from "../input/decode.js";
 import { TerminalController, type SessionLike } from "../app/controller.js";
 import type { ScreenSnapshot } from "@ts5250/tn5250";
+import { cursorSequence } from "../app/view.js";
 
 export interface TerminalSource {
   session: SessionLike;
@@ -16,6 +17,8 @@ export interface TerminalSource {
 export interface RunOptions {
   prefix: string;
   sbcsOnly: boolean;
+  /** ホストの SBCS 表がカタカナ側（930/5026）か。表示コードの切替の向き */
+  hostKatakana?: boolean;
 }
 
 export function colorMode(): ColorMode {
@@ -31,6 +34,7 @@ export function runTerminal(src: TerminalSource, opts: RunOptions, onExit?: () =
   const decoder = new KeyDecoder();
   const mode = colorMode();
   let prev: string[] | undefined;
+  let curSeq = "";
 
   const out = (s: string): void => void process.stdout.write(s);
   const paint = (full = false): void => {
@@ -39,14 +43,24 @@ export function runTerminal(src: TerminalSource, opts: RunOptions, onExit?: () =
       colorMode: mode,
       note: ctl.note,
       cursor: ctl.cursor,
-      insert: ctl.insertMode
+      insert: ctl.insertMode,
+      view: ctl.view,
+      prefix: ctl.prefix,
+      hostKatakana: opts.hostKatakana === true,
+      ...(ctl.view.rule ? { ruleAt: ctl.ruleAt() } : {})
     });
+    // カーソルの形（DECSCUSR）は変わったときだけ送る。挿入中は下線
+    const seq = cursorSequence(ctl.view, ctl.insertMode);
+    if (seq !== curSeq || full) {
+      out(seq);
+      curSeq = seq;
+    }
     out(paintDiff(full ? undefined : prev, f));
     prev = f.rows;
   };
   const restore = (): void => {
     // 代替画面・折返し・括弧付きペースト・カーソルを元へ
-    out("\x1b[0m\x1b[?2004l\x1b[?7h\x1b[?25h\x1b[?1049l");
+    out("\x1b[0m\x1b[0 q\x1b[?2004l\x1b[?7h\x1b[?25h\x1b[?1049l");
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
   };
   const finish = (): void => {
