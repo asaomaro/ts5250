@@ -200,3 +200,46 @@ describe("流し込み: 右が先、尽きたら下", () => {
     w.unmount();
   });
 });
+
+
+describe("複数行ペースト直後の描画", () => {
+  it.each([false, true])("別々の欄を全行すぐ描く（DBCS=%s）", async (dbcs) => {
+    const fields = [5, 6, 7].map((row, i) => fld(i + 1, row, 10, 10, dbcs ? { dbcsType: "open" } : {}));
+    const w = mountGrid(fields);
+    try {
+      const inputs = w.findAll<HTMLInputElement>("input.grid-input");
+      await inputs[0]!.trigger("focus");
+      inputs[0]!.element.setSelectionRange(0, 0);
+      await paste(inputs[0]!, "AAA\nBBB\nCCC");
+      for (const [i, word] of ["AAA", "BBB", "CCC"].entries()) {
+        expect(lastEdit(w, i + 1)).toContain(word);
+        expect(inputs[i]!.element.value.trim()).toBe(word);
+      }
+    } finally {
+      w.unmount();
+    }
+  });
+
+  it("欄外からのペーストも更新済みの値を即座に描く", () => {
+    const w = mountGrid([fld(1, 5, 10, 10), fld(2, 6, 10, 10)]);
+    try {
+      (w.vm as unknown as { pasteAt: (r: number, c: number, t: string) => void }).pasteAt(5, 10, "AAA\nBBB");
+      expect(w.findAll<HTMLInputElement>("input.grid-input").map((i) => i.element.value.trim())).toEqual(["AAA", "BBB"]);
+    } finally {
+      w.unmount();
+    }
+  });
+
+  it("非表示欄へ貼った値は DOM に出さない", async () => {
+    const w = mountGrid([fld(1, 5, 10, 10), fld(2, 6, 10, 10, { hidden: true })]);
+    try {
+      const inputs = w.findAll<HTMLInputElement>("input.grid-input");
+      await inputs[0]!.trigger("focus");
+      await paste(inputs[0]!, "AAA\nSECRET");
+      expect(lastEdit(w, 2)).toContain("SECRET");
+      expect(inputs[1]!.element.value.trim()).toBe("");
+    } finally {
+      w.unmount();
+    }
+  });
+});

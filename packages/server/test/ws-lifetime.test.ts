@@ -252,6 +252,35 @@ describe("activity: 在席の合図", () => {
 });
 
 describe("ハートビート", () => {
+  it.each(["srv:d", "srv:p"])("%s: pong があれば有限の無操作時間を越えても切らない", async (session) => {
+    vi.useFakeTimers();
+    const { conn, mgr } = setup({ idleTimeout: 1 });
+    try {
+      await conn.handle(JSON.stringify({ type: "open", session }));
+      for (let i = 0; i < 6; i++) {
+        vi.advanceTimersByTime(30_000);
+        await conn.handle(JSON.stringify({ type: "pong" }));
+        (mgr as unknown as { sweepIdle: () => void }).sweepIdle();
+        expect(mgr.size).toBe(1);
+      }
+      // 生存の合図が途絶えた場合の回収は残す。
+      vi.advanceTimersByTime(61_000);
+      (mgr as unknown as { sweepIdle: () => void }).sweepIdle();
+      expect(mgr.size).toBe(0);
+    } finally {
+      conn.onSocketClose();
+      mgr.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it("open 前の pong は無視し、他のセッションに触らない", async () => {
+    const { conn, mgr, sent } = setup();
+    await conn.handle(JSON.stringify({ type: "pong" }));
+    expect(mgr.touched).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
   it("間隔ごとに ping を送る", async () => {
     vi.useFakeTimers();
     try {

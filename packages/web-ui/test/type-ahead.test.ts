@@ -194,6 +194,39 @@ describe("施錠中の打鍵を溜めて、解錠で再生する", () => {
   });
 });
 
+describe("キーの自動リピートを先打ちに蓄積しない", () => {
+  it.each(["PageDown", "PageUp", "Enter"])("%s を離したあと、応答が来ても続行しない", async (key) => {
+    await mountPane();
+    await press(key);
+    expect(keysSent()).toHaveLength(1);
+    for (let i = 0; i < 20; i++) await press(key, { repeat: true });
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true }));
+    await unlock(true);
+    await unlock(true);
+    expect(keysSent().map((m) => m.key)).toEqual([key]);
+    expect(st().typeAhead ?? []).toEqual([]);
+  });
+
+  it("応答待ちの繰り返し文字も溜めず、別々に押した文字は残す", async () => {
+    const { el } = await mountPane();
+    st().busy = true;
+    await nextTick();
+    await press("A");
+    await press("A", { repeat: true });
+    await press("A");
+    await unlock();
+    expect(el.value.trim()).toBe("AA");
+  });
+
+  it("解錠中は自動リピートでページ送りできる", async () => {
+    await mountPane();
+    await press("PageDown");
+    await unlock(true);
+    await press("PageDown", { repeat: true });
+    expect(keysSent().map((m) => m.key)).toEqual(["PageDown", "PageDown"]);
+  });
+});
+
 describe("溜めを捨てる／溜めない", () => {
   it("**Insert は溜めずにその場で切り替わる**（ACS は `[insert]` を溜めない）", async () => {
     const { w } = await mountPane();

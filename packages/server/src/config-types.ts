@@ -233,7 +233,7 @@ export const systemSchema = z
 export type System = z.infer<typeof systemSchema>;
 
 /**
- * 無操作で切るまでの時間。`"never"`＝切らない（永続）/ 数値＝**分**（1〜1440）。
+ * 操作・生存の合図が途絶えてから切るまでの時間。`"never"`＝切らない（永続）/ 数値＝**分**（1〜1440）。
  * 未設定はサーバー既定（`--idle-timeout`。既定は永続）に従う。
  *
  * **`0` も `null` も「切らない」の印にしない。** 未設定・転記漏れと見分けが付かなくなる。
@@ -349,7 +349,7 @@ const sessionBase = {
   /** `msgwatch` のみ。常駐で待ち受けるメッセージ待ち行列（同上） */
   msgWatch: msgWatchSchema.optional(),
   /**
-   * 無操作で切るまでの時間（display / printer 双方で意味を持つ）。
+   * 操作・生存の合図が途絶えてから切るまでの時間（display / printer 双方で意味を持つ）。
    *
    * **信頼設定ではない**——サーバー上のパス書き込み・コマンド実行・秘密のいずれにも触れないので、
    * `watermark` と同じ理屈でサーバー設定・個人設定の両方が持てる。
@@ -700,7 +700,7 @@ export interface PublicSession {
   enhanced?: boolean;
   /** display のみ。画面に重ねる透かし（描くのはブラウザ。信頼設定ではない） */
   watermark?: Watermark;
-  /** 無操作で切るまでの時間。`"never"`＝切らない / 数値＝分。未設定はサーバー既定に従う */
+  /** 操作・生存の合図が途絶えてから切るまでの時間。`"never"`＝切らない / 数値＝分。未設定はサーバー既定に従う */
   idleTimeout?: IdleTimeout;
   /** `dtaqwatch` のみ。常駐監視するデータ待ち行列（信頼設定ではないので値ごと返す） */
   dtaqWatch?: DtaqWatchSpec;

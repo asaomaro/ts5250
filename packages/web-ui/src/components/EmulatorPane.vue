@@ -1479,7 +1479,9 @@ function holdTypeAhead(ev: KeyboardEvent): boolean {
     case "hold":
       ev.preventDefault();
       ev.stopPropagation();
-      pushTypeAhead({
+      // 応答より速い OS の自動リピートは溜めない。離した後もページ送り等が続くのを防ぐ。
+      // 押し直したキーは repeat=false なので、通常の先打ち・連打は残す。
+      if (!ev.repeat) pushTypeAhead({
         key: ev.key, code: ev.code,
         shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, metaKey: ev.metaKey
       });

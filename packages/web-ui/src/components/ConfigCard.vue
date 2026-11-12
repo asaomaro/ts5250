@@ -1198,7 +1198,7 @@ const infoRows = computed(() => {
           「既定のまま」と「このセッションは切らない」は違う意思表示になる。
         -->
         <label class="row">
-          <span class="cap" title="この時間だけ何も操作しなければセッションを閉じます。入力中・カーソル移動中は操作として数えます">
+          <span class="cap" title="操作や生存の合図がこの時間だけ届かなければセッションを閉じます。ブラウザが応答している間は無操作でも切断しません">
             無操作で切る
           </span>
           <select v-model="sesForm.idleTimeout">

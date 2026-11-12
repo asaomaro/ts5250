@@ -3,13 +3,12 @@
 //   既定（永続）    — 無操作のまま放置しても切れない。**110 秒放置する**ので、
 //                     同時に**ハートビートの往復**も検証している（pong を返さなければ
 //                     サーバーは 90 秒で半開きと判断して畳む）
-//   有限値 × 放置   — セッション設定の `idleTimeout: 1`（1 分）で、無操作なら切れる
+//   有限値 × 放置   — セッション設定の `idleTimeout: 1`（1 分）でも、心拍に応答していれば切れない
 //   有限値 × 操作中 — 打鍵していれば切れない（**AID キーは押さない**）。
-//                     これが在席の合図（`{type:"activity"}`）の唯一の実地検証
+//                     操作中も心拍と並行して接続が維持されることを見る。
 //
-// **打鍵中に切られないことは、ここでしか分からない。** 単体テストは合図を出すところと
-// `lastActivity` が進むところまでしか見ておらず、間引き（15 秒）と掃除の間隔と
-// タイムアウト値の噛み合わせは実物を動かすほかない。
+// 実ブラウザの心拍と掃除の周期を組み合わせ、ホストの接続が維持されるか確認する。
+// 操作通知単独の効果は、心拍も生存を更新するため、このスクリプトだけでは切り分けない。
 //
 // 掃除の間隔だけ 2 秒に縮めている（`startIdleSweep(2000)`）。**判定そのものは実装のまま**で、
 // 「超過を見つけてから切るまで」の待ち時間を削っているだけ。
@@ -218,15 +217,15 @@ try {
   }
   const elapsed3 = Math.round((Date.now() - t1) / 1000);
   check(
-    `1 分設定でも打鍵していれば ${elapsed3} 秒切れない（在席の合図が効いている）`,
+    `1 分設定でも打鍵していれば ${elapsed3} 秒切れない（操作・心拍による生存更新）`,
     !deadTyping,
     `elapsed=${elapsed3}s`
   );
   await shot("04-alive-while-typing");
   await signoff();
 
-  // ---------- 4. 有限値（1 分）× 放置: 切れる ----------
-  log("== phase 4: 1 分設定で放置して切れるのを待つ ==");
+  // ---------- 4. 有限値（1 分）× 放置: 心拍で生存を更新する ----------
+  log("== phase 4: 1 分設定でも無操作のまま接続を保つ ==");
   check("DEV1-1MIN で再接続", await connect("DEV1-1MIN"));
   const t2 = Date.now();
   let deadIdle = false;
@@ -238,9 +237,9 @@ try {
     }
   }
   const elapsed4 = Math.round((Date.now() - t2) / 1000);
-  check(`1 分設定で放置すると切れる（${elapsed4} 秒で切断）`, deadIdle, `elapsed=${elapsed4}s`);
-  check("設定した 1 分より早くは切らない", !deadIdle || elapsed4 >= 60, `elapsed=${elapsed4}s`);
-  await shot("05-closed-after-idle");
+  check(`1 分設定でも心拍に応答していれば ${elapsed4} 秒放置しても切れない`, !deadIdle && elapsed4 >= 100, `elapsed=${elapsed4}s`);
+  await shot("05-alive-after-configured-idle");
+  await signoff();
 } catch (e) {
   check("例外なく完走", false, e.message);
   log(e.stack ?? "");
