@@ -342,7 +342,9 @@ export class WsConnection {
           // 15 秒間隔で流れるので本来の記録を量で押し流す
           return this.onActivity();
         case "pong":
-          return; // 生存の更新は上で済んでいる
+          // ブラウザが応答できる間は無操作でもホスト接続を保つ。
+          // ホストへは送らず、IBM i 自身の無操作判定には介入しない。
+          return this.onActivity();
         case "close":
           return this.dispose("closed by client");
         default:

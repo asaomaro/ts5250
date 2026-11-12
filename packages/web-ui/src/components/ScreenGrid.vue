@@ -2187,10 +2187,11 @@ function dbcsRestLayout(f: Field, marks?: ShiftMarkStyle): DbcsViewLayout {
 //     value 再設定で caret が末尾へ飛ぶため、明示的に補正する）。
 const composing = ref(false);
 /**
- * blur 時に行を 1 度だけ再描画させるためのティック。編集した色付き欄のオーバーレイは
+ * blur・矩形ペースト時に行を再描画させるためのティック。編集した色付き欄のオーバーレイは
  * props.edits の値を反映するが、行は v-memo で編集中は再描画されない（入力は writeSlices で直更新）。
  * フォーカスが外れたら（onInputBlur で ++）オーバーレイを編集値の色付きに描き直す。
- * **フォーカス中は増やさない**——編集中に再描画するとキャレット/IME が乱れるため。
+ * 通常の打鍵では増やさない——編集中の不要な再描画はキャレット/IME を乱すため。
+ * 矩形ペーストだけは全欄の確定後に増やし、非フォーカス行の色付き表示も反映する。
  */
 const renderTick = ref(0);
 const insertMode = defineModel<boolean>("insertMode", { default: false });
@@ -4348,14 +4349,28 @@ function pasteFrom(
       const meta = jeMeta(field, val, undefined);
       if (meta) emit("edit", field.index, widenNul(val), meta);
       else emit("edit", field.index, widenNul(val));
-      // :value バインドは v-memo でキャッシュされ再評価されないため、全スライスの input を直接更新する
-      // （表示はセンチネル→空白。生のセンチネルは Nerd Font で可視化・桁溢れするため）
-      slicesOf(field).forEach((_s, i) => {
+      // emit は親の props の同期更新を保証せず、v-memo は :value の再描画を省く。
+      // props を読む sliceValue ではなく、今回確定した値から全行を直接描く。
+      const lay = isDbcsEdit(field)
+        ? dbcsViewLayout(padDbcs(field, [...val]).join(""), soMark(field), siMark(field))
+        : undefined;
+      const masked = maskSafe(field, val);
+      slicesOf(field).forEach((sl, i) => {
         const inp = inputForSlice(field, i);
-        if (inp) inp.value = displayText(stripSentinels(sliceValue(field, i)));
+        if (!inp) return;
+        const value = lay && !field.hidden
+          ? dbcsSliceText(lay, sl)
+          : masked.slice(sl.offset, sl.offset + sl.width).padEnd(sl.width, " ");
+        inp.value = displayText(stripSentinels(value));
       });
     }
   }
+  // input の直更新だけでは、非フォーカス行は透明な文字の上に古い色付き表示が残る。
+  // 全欄の edit 通知を出した後に v-memo を無効にし、親が反映した値でまとめて描き直す。
+  const needsOverlayRefresh = built.some(({ field }) =>
+    slicesOf(field).some((_sl, i) => inputForSlice(field, i)?.classList.contains("has-overlay"))
+  );
+  if (needsOverlayRefresh) renderTick.value++;
 }
 
 /** 通信中・ロック中・保護欄では beforeinput をブロック（貼り付けは @paste で扱う）。 */
@@ -5981,7 +5996,10 @@ onBeforeUnmount(() => {
 
 .grid-input {
   font: inherit;
-  height: 1.25em;
+  /* 高さを固定すると input 内部の縦中央寄せで端数が丸められ、同じ line-height の
+     色付きオーバーレイと文字の縦位置がずれる。行高から自然に決め、下線の分は行内に収める。 */
+  height: auto;
+  max-height: 1.25em;
   padding: 0;
   margin: 0;
   border: none;

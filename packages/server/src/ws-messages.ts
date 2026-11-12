@@ -156,7 +156,7 @@ export interface WsSysReqLine {
   type: "sysreq-line";
   open: boolean;
 }
-/** ハートビートの応答（`ping` への返し）。半開きソケットの検出に使う */
+/** ハートビートの応答（`ping` への返し）。半開きソケットの検出とセッションの生存更新に使う */
 export interface WsPong {
   type: "pong";
 }

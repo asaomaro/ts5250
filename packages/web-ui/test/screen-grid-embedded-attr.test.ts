@@ -224,3 +224,36 @@ describe("入力欄の埋め込み属性（色替え）", () => {
   });
 
 });
+
+
+describe("SEU の色付きソースへの矩形ペースト", () => {
+  it.each([false, true])("非フォーカス行のオーバーレイも、ペースト直後に全行更新する（DBCS=%s）", async (dbcs) => {
+    const snapshot = snapWithEmbeddedAttr();
+    snapshot.cells[6] = snapshot.cells[5]!.map((c) => ({ ...c }));
+    snapshot.cells[7] = snapshot.cells[5]!.map((c) => ({ ...c }));
+    snapshot.fields = [6, 7, 8].map((row, i) => ({ ...FIELD, index: i + 1, row, ...(dbcs ? { dbcsType: "open" as const, value: "ABC DEF" } : {}) }));
+    const edits = reactive(new Map<number, string>());
+    const w = mount(ScreenGrid, {
+      props: {
+        snapshot, edits, focused: true,
+        onEdit: (index: number, value: string) => { edits.set(index, value); }
+      },
+      attachTo: document.body
+    });
+    try {
+      const input = w.find<HTMLInputElement>("input.grid-input");
+      input.element.focus();
+      // フォーカス切替の描画を先に完了させ、ペースト自体の再描画だけを検証する。
+      await nextTick();
+      input.element.setSelectionRange(0, 0);
+      await input.trigger("paste", { clipboardData: { getData: () => "AAA\nBBB\nCCC" } });
+      await nextTick();
+      expect([...edits.values()].map((v) => v.slice(0, 3))).toEqual(["AAA", "BBB", "CCC"]);
+      const overlays = w.findAll(".input-overlay");
+      expect(overlays).toHaveLength(3);
+      expect(overlays.map((o) => o.element.textContent!.slice(0, 3))).toEqual(["AAA", "BBB", "CCC"]);
+    } finally {
+      w.unmount();
+    }
+  });
+});
