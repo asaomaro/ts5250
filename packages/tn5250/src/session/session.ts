@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 import { isSplitLead, isSplitTail } from "../screen/attr-sentinel.js";
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
 import { As400Error, deviceEnvFor, type KatakanaVariant } from "@ts5250/base";
@@ -70,6 +71,7 @@ export interface ConnectOptions {
    * 無通信のあいだに探査が失敗して接続が落ちる（Windows は 10 秒ほど）。途中の機器が無通信の接続を落とす環境だけ true にする（`transport/tcp.ts` の注記）
    */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
   /**
    * **関連付けプリンターの装置名**（表示セッションだけ。`20260921-associated-printer`）。空白だけなら申告しない。
    * 申告の位置と値の扱いは `TelnetOptions.associatedPrinter`
@@ -347,6 +349,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       port: opts.port ?? (opts.tls ? 992 : 23), // TLS 既定 992・平文 23
       ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
+      ...(opts.keepAliveOptions !== undefined ? { keepAliveOptions: opts.keepAliveOptions } : {}),
       keepAlive: opts.keepAlive === true // 表示セッションは既定で入れない（ACS と同じ）
     });
   }

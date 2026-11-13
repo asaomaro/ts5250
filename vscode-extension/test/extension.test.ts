@@ -35,6 +35,7 @@ const { registerCustomEditorProvider, createOutputChannel } = vi.hoisted(() => (
 }));
 vi.mock("vscode", () => ({
   window: { registerCustomEditorProvider, createOutputChannel },
+  workspace: { getConfiguration: () => ({ get: () => undefined }) },
   ExtensionMode: { Production: 1, Development: 2, Test: 3 }
 }));
 

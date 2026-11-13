@@ -68,6 +68,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     webRootPath,
     connectionsPath: join(globalStorageDir, "connections.json"),
     profilesPath: join(globalStorageDir, "profiles.json"),
+    nodePath: vscode.workspace.getConfiguration("ts5250").get<string>("nodePath") || "node",
     secretKeyFilePath: join(globalStorageDir, ".env"),
     windowId: randomUUID(),
     ...buildIdOption(serverMainPath, webRootPath),

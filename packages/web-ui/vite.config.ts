@@ -19,6 +19,8 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // ブラウザの Storage は jsdom に任せる。Node 26 の同名グローバルが先に存在すると登録されない。
+    execArgv: ["--no-experimental-webstorage"],
     include: ["test/**/*.test.ts"],
     // **毎テスト後にマウントを畳む**（`test/setup.ts`）。付けっぱなしの
     // コンポーネントがフォーカスを保持し、回ごとに違うテストが落ちていた

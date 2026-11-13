@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 import { Emitter } from "./emitter.js";
 import { As400Error } from "@ts5250/base";
 import { codecForCcsid } from "@ts5250/ebcdic";
@@ -37,6 +38,7 @@ export interface PrinterConnectOptions {
    * （`20260930-printer-keepalive-off`）
    */
   keepAlive?: boolean | undefined;
+  keepAliveOptions?: TcpKeepAliveOptions;
   /**
    * 自動サインオンの代替パスワードを作る関数（渡せば ACS と同じく暗号化して送る。`telnet.ts` の `passwordSubstitute`）。
    * 計算は QPWDLVL で分かれ、その値はサインオン・サーバーに聞く——このパッケージはホストサーバーに依存しないので呼び出し側が渡す
@@ -168,6 +170,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
         port: opts.port ?? (opts.tls ? 992 : 23),
         ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
         ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
+        ...(opts.keepAliveOptions !== undefined ? { keepAliveOptions: opts.keepAliveOptions } : {}),
         keepAlive: opts.keepAlive === true // 既定は入れない（ACS と同じ）
       });
     }

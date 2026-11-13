@@ -32,7 +32,7 @@ describe("TcpTransport の keepAlive（3270）", () => {
     const port = await listen();
     const spy = vi.spyOn(Socket.prototype, "setKeepAlive");
     const t = await TcpTransport.connect({ host: "127.0.0.1", port });
-    expect(spy).toHaveBeenCalledWith(true, 60_000);
+    expect(spy).toHaveBeenCalledWith(true, 60_000, 1000, 10);
     t.close();
   });
 
@@ -60,6 +60,15 @@ describe("3270 セッションの keepAlive", () => {
   it("`keepAlive: true` なら入れる（途中の機器が無通信の接続を落とす環境向け）", async () => {
     const spy = vi.spyOn(Socket.prototype, "setKeepAlive");
     await open(true);
-    expect(spy).toHaveBeenCalledWith(true, 60_000);
+    expect(spy).toHaveBeenCalledWith(true, 60_000, 1000, 10);
   });
 });
+
+  it("指定した開始時間・間隔・回数を実 TCP ソケットへ渡す", async () => {
+    const port = await listen();
+    const spy = vi.spyOn(Socket.prototype, "setKeepAlive");
+    const timings = { initialDelayMs: 120000, intervalMs: 30000, count: 4 };
+    const transport = await TcpTransport.connect({ host: "127.0.0.1", port, keepAlive: true, keepAliveOptions: timings });
+    expect(spy).toHaveBeenCalledWith(true, 120000, 30000, 4);
+    transport.close();
+  });

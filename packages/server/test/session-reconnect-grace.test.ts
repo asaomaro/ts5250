@@ -603,3 +603,33 @@ describe("無期限の猶予中でも掃除される経路", () => {
     mgr.closeAll();
   });
 });
+
+
+describe("ブラウザ切断後の統一保持時間", () => {
+  it.each([false, true])("切断理由 stalled=%s にかかわらず同じ期限で切る", async (stalled) => {
+    const mgr = new SessionManager({ connectionHoldMs: 120000 });
+    const entry = await open(mgr);
+    vi.useFakeTimers();
+    try {
+      expect(mgr.holdForReconnect(entry.id, stalled)).toBe(true);
+      await vi.advanceTimersByTimeAsync(119999);
+      expect(mgr.size).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mgr.size).toBe(0);
+    } finally { mgr.closeAll(); vi.useRealTimers(); }
+  });
+  it.each([false, true])("個別の保持解除と無期限 stalled=%s", async (stalled) => {
+    const mgr = new SessionManager({ connectionHoldMs: 1000 });
+    const entry = await mgr.open({ transport: new ReplayTransport(signon()), host: "h", connectionHoldMs: "never" });
+    vi.useFakeTimers();
+    try {
+      expect(mgr.holdForReconnect(entry.id, stalled)).toBe(true);
+      await vi.advanceTimersByTimeAsync(7200000);
+      expect(mgr.size).toBe(1);
+      mgr.cancelHold(entry.id);
+      expect(mgr.isHeld(entry.id)).toBe(false);
+      const immediate = await mgr.open({ transport: new ReplayTransport(signon()), host: "h", connectionHoldMs: 0 });
+      expect(mgr.holdForReconnect(immediate.id, stalled)).toBe(false);
+    } finally { mgr.closeAll(); vi.useRealTimers(); }
+  });
+});

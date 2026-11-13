@@ -1,3 +1,6 @@
+import { isIP } from "node:net";
+import { tcpKeepAliveArgs } from "@ts5250/base";
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 /**
  * DDM サーバー（DRDA ポート 446 / TLS 448）とのソケット。
  *
@@ -21,10 +24,11 @@ export interface DdmTransportOptions {
   timeoutMs?: number;
   /**
    * **TCP キープアライブを入れるか**（既定 false。ACS 同梱の `jt400` も既定で入れない——`SocketProperties` の `keepAlive` は設定しなければ JVM の既定）。
-   * 入れると一時的な回線断で無通信のあいだに探査が失敗して接続が落ちる（Windows は 10 秒ほど）。**常駐の待ち受け**（DTAQ の `wait=-1`・メッセージ待ち）が
+   * 入れると一時的な回線断で無通信のあいだに探査が失敗して接続が落ちる（既定では Windows は 10 秒ほど）。**常駐の待ち受け**（DTAQ の `wait=-1`・メッセージ待ち）が
    * 途中の機器に無通信の接続を落とされる環境だけ true にする（セッション設定 `keepAlive`。`20260930-hostserver-keepalive-off`）
    */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
 }
 
 export interface DdmTransport {
@@ -39,7 +43,8 @@ function isCertError(err: NodeJS.ErrnoException): boolean {
   return typeof err.code === "string" && /CERT|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(err.code);
 }
 
-export function openDdmTransport(opts: DdmTransportOptions): Promise<DdmTransport> {
+export async function openDdmTransport(opts: DdmTransportOptions): Promise<DdmTransport> {
+  if (opts.keepAlive === true) tcpKeepAliveArgs(opts.keepAliveOptions);
   const timeoutMs = opts.timeoutMs ?? 20_000;
   return new Promise((resolve, reject) => {
     const tlsOpts = typeof opts.tls === "object" ? opts.tls : {};
@@ -47,14 +52,15 @@ export function openDdmTransport(opts: DdmTransportOptions): Promise<DdmTranspor
       ? tlsConnect({
           host: opts.host,
           port: opts.port,
-          servername: opts.host,
+          // Node 26 は IP を SNI 名として受け付けない。証明書の宛先検証は host で継続する。
+        ...(isIP(opts.host) === 0 ? { servername: opts.host } : {}),
           rejectUnauthorized: tlsOpts.rejectUnauthorized ?? true,
           ...(tlsOpts.ca !== undefined ? { ca: tlsOpts.ca } : {})
         })
       : netConnect({ host: opts.host, port: opts.port });
     // **TCP キープアライブは既定で入れない**（`host-connection.ts` と同じ。`20260930-hostserver-keepalive-off`）。
     // 入れる環境（NAT やファイアウォールが無通信の接続を落とす）は値も揃える（同じ性質の待ちを別の値にしない）
-    if (opts.keepAlive === true) socket.setKeepAlive(true, 60_000);
+    if (opts.keepAlive === true) socket.setKeepAlive(...tcpKeepAliveArgs(opts.keepAliveOptions));
 
     let buffer = Buffer.alloc(0);
     /** 受信済みで未消費のフレーム。要求より先に届くことがある（チェイン応答） */

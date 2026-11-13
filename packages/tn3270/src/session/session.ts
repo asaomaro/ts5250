@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 import { As400Error, childLog, deviceEnvFor } from "@ts5250/base";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { TcpTransport } from "../transport/tcp.js";
@@ -61,6 +62,7 @@ export interface Connect3270Options {
    * 無通信のあいだに探査が失敗して接続が落ちる（Windows は 10 秒ほど）。途中の機器が無通信の接続を落とす環境だけ true（`20260930-display-keepalive-off`）
    */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
   negotiateTimeoutMs?: number;
 }
 
@@ -179,6 +181,7 @@ export class Tn3270Session {
         ? { connectTimeoutMs: this.opts.connectTimeoutMs }
         : {}),
       ...(this.opts.tls !== undefined ? { tls: this.opts.tls } : {}),
+      ...(this.opts.keepAliveOptions !== undefined ? { keepAliveOptions: this.opts.keepAliveOptions } : {}),
       keepAlive: this.opts.keepAlive === true // 既定は入れない（ACS と同じ）
     });
     this.attach(transport);

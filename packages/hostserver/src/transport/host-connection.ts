@@ -1,3 +1,6 @@
+import { isIP } from "node:net";
+import { tcpKeepAliveArgs } from "@ts5250/base";
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 /**
  * IBM i ホストサーバー向けの I/O（ソケットとフレーム分割）。
  *
@@ -21,10 +24,11 @@ export interface HostConnectionOptions {
   timeoutMs?: number;
   /**
    * **TCP キープアライブを入れるか**（既定 false。ACS 同梱の `jt400` も既定で入れない——`SocketProperties` の `keepAlive` は設定しなければ JVM の既定）。
-   * 入れると一時的な回線断で無通信のあいだに探査が失敗して接続が落ちる（Windows は 10 秒ほど）。**常駐の待ち受け**（DTAQ の `wait=-1`・メッセージ待ち）が
+   * 入れると一時的な回線断で無通信のあいだに探査が失敗して接続が落ちる（既定では Windows は 10 秒ほど）。**常駐の待ち受け**（DTAQ の `wait=-1`・メッセージ待ち）が
    * 途中の機器に無通信の接続を落とされる環境だけ true にする（セッション設定 `keepAlive`。`20260930-hostserver-keepalive-off`）
    */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
 }
 
 /** 1 往復ぶんの読み取りタイムアウトを上書きするオプション */
@@ -79,7 +83,8 @@ function isCertError(err: NodeJS.ErrnoException): boolean {
 }
 
 /** ホストサーバーへ接続する */
-export function openHostConnection(opts: HostConnectionOptions): Promise<HostConnection> {
+export async function openHostConnection(opts: HostConnectionOptions): Promise<HostConnection> {
+  if (opts.keepAlive === true) tcpKeepAliveArgs(opts.keepAliveOptions);
   const timeoutMs = opts.timeoutMs ?? 20_000;
   return new Promise((resolve, reject) => {
     const tlsOpts = typeof opts.tls === "object" ? opts.tls : {};
@@ -87,7 +92,8 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
       ? tlsConnect({
           host: opts.host,
           port: opts.port,
-          servername: opts.host,
+          // Node 26 は IP を SNI 名として受け付けない。証明書の宛先検証は host で継続する。
+        ...(isIP(opts.host) === 0 ? { servername: opts.host } : {}),
           // 証明書検証は既定 ON（無効化は明示オプトイン）
           rejectUnauthorized: tlsOpts.rejectUnauthorized ?? true,
           ...(tlsOpts.ca !== undefined ? { ca: tlsOpts.ca } : {})
@@ -125,9 +131,9 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
     socket.setTimeout(timeoutMs);
     // **TCP キープアライブは既定で入れない**（ACS 同梱の `jt400` と同じ。`20260930-hostserver-keepalive-off`）。以前は既定で入れていた——
     // 常駐監視（DTAQ の `wait=-1`）は read タイムアウトを無効にして待つので、**相手が黙って消えても永久に待ち続ける**（`20260723-dtaq-watch-notify` research R3）。
-    // ただし入れると、一時的な回線断で無通信のあいだの探査が失敗して接続が落ちる（Windows は 10 秒ほど）。**常駐の待ち受けが途中の機器に落とされる環境だけ**
+    // ただし入れると、一時的な回線断で無通信のあいだの探査が失敗して接続が落ちる（既定では Windows は 10 秒ほど）。**常駐の待ち受けが途中の機器に落とされる環境だけ**
     // セッション設定 `keepAlive: true` で入れる。要求ごとの短い接続には要らない。
-    if (opts.keepAlive === true) socket.setKeepAlive(true, 60_000);
+    if (opts.keepAlive === true) socket.setKeepAlive(...tcpKeepAliveArgs(opts.keepAliveOptions));
     socket.on("timeout", () =>
       fail(
         new As400Error(

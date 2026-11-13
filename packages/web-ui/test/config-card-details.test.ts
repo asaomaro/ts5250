@@ -57,3 +57,17 @@ describe("通常版の詳細設定", () => {
     w.unmount();
   });
 });
+
+
+it("通常版でも TCP 詳細と接続保持を保存できる", async () => {
+  const current = { ...SESSION, keepAlive: true, connectionHold: "never" as const, keepAliveOptions: { intervalMs: 30000, count: 4 } };
+  const update = vi.spyOn(systemsStore, "updateSession").mockResolvedValue(current);
+  const w = mount(ConfigCard, { props: { kind: "session", session: current } });
+  await w.findAll("button").find((b) => b.text() === "編集")!.trigger("click");
+  expect(w.find<HTMLInputElement>('[data-setting="intervalMs"]').element.value).toBe("30");
+  await w.find('[data-setting="initialDelayMs"]').setValue("120");
+  await w.find('[data-setting="connectionHoldMode"]').setValue("limited");
+  await w.find('[data-setting="connectionHold"]').setValue("5");
+  await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click"); await flushPromises();
+  expect(update).toHaveBeenCalledWith(SESSION.ref, expect.objectContaining({ connectionHold: 5, keepAliveOptions: { initialDelayMs: 120000, intervalMs: 30000, count: 4 } }));
+});

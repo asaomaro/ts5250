@@ -396,12 +396,12 @@ describe("通常版の初期表示・通信設定", () => {
     const listing = await app.request("/api/systems", { headers });
     const systems = await listing.json() as { systems: { ref: string; ifsPath?: string; sqlInitial?: string }[] };
     expect(systems.systems.find((s) => s.ref === system.ref)).toMatchObject({ ifsPath: "/home/USER", sqlInitial: "SELECT 1" });
-    const opened = await post(app, "/api/sessions-config", { source, name: "details", system: system.ref, sessionType: "display", keepAlive: true, deviceNameRetry: true, enhanced: true }, token);
+    const opened = await post(app, "/api/sessions-config", { source, name: "details", system: system.ref, sessionType: "display", keepAlive: true, keepAliveOptions: { initialDelayMs: 120000, intervalMs: 10000, count: 6 }, connectionHold: 10, deviceNameRetry: true, enhanced: true }, token);
     expect(opened.status).toBe(201);
     const { session } = await opened.json() as { session: { ref: string } };
     const sessionListing = await app.request("/api/sessions-config", { headers });
     const sessions = await sessionListing.json() as { sessions: { ref: string }[] };
-    expect(sessions.sessions.find((s) => s.ref === session.ref)).toMatchObject({ enhanced: true, deviceNameRetry: true, keepAlive: true });
+    expect(sessions.sessions.find((s) => s.ref === session.ref)).toMatchObject({ enhanced: true, deviceNameRetry: true, keepAlive: true, keepAliveOptions: { initialDelayMs: 120000, intervalMs: 10000, count: 6 }, connectionHold: 10 });
     const updated = await app.request(`/api/systems/${system.ref}`, { method: "PUT", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ name: "initial", host: "AS400" }) });
     expect(updated.status).toBe(200);
     const cleared = await updated.json() as { system: Record<string, unknown> };

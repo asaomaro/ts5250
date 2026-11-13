@@ -107,7 +107,7 @@ if (mode === "--noop") {
       `Node.js のバージョンが古すぎます。\n` +
         `  必要: ${range}   (package.json の engines.node)\n` +
         `  現在: v${process.versions.node}\n` +
-        `ビルドに使う vite / rolldown の要求です。満たさない Node ではビルドが途中で落ち、\n` +
+        `TCP キープアライブの詳細設定に Node.js 26.4 以降が必要です。古い Node ではビルドや起動が失敗し、\n` +
         `古い dist が残ったまま起動して**古い画面が配信されます**。\n`
     );
     process.exit(1);

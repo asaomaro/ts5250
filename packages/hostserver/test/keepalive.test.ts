@@ -94,7 +94,7 @@ describe("トランスポートの keepAlive", () => {
     expect(spy).not.toHaveBeenCalled();
     a.close();
     const b = await openHostConnection({ host: "127.0.0.1", port, keepAlive: true });
-    expect(spy).toHaveBeenCalledWith(true, 60_000);
+    expect(spy).toHaveBeenCalledWith(true, 60_000, 1000, 10);
     b.close();
   });
 
@@ -106,7 +106,7 @@ describe("トランスポートの keepAlive", () => {
     expect(spy).not.toHaveBeenCalled();
     a.close();
     const b = await openDdmTransport({ host: "127.0.0.1", port, keepAlive: true });
-    expect(spy).toHaveBeenCalledWith(true, 60_000);
+    expect(spy).toHaveBeenCalledWith(true, 60_000, 1000, 10);
     b.close();
   });
 });

@@ -89,3 +89,20 @@ describe("詳細設定の入力形状", () => {
     expect(parseTs5250File(JSON.stringify({ host: "AS400", ...values }), "emulator").ok).toBe(false);
   });
 });
+
+
+describe("接続時間設定の検証", () => {
+  it.each([
+    { keepAliveOptions: null }, { keepAliveOptions: [] }, { keepAliveOptions: { count: "8" } },
+    { keepAliveOptions: { intervalMs: 500 } }, { keepAliveOptions: { initialDelayMs: 1500 } },
+    { keepAliveOptions: { intervalMs: 32768000 } }, { keepAliveOptions: { count: 128 } },
+    { keepAliveOptions: { extra: true } }, { connectionHold: null }, { connectionHold: "10" },
+    { connectionHold: -1 }, { connectionHold: 1.5 }, { connectionHold: 1441 }
+  ])("不正な値 %j を受理しない", (fields) => {
+    expect(parseTs5250File(JSON.stringify({ host: "AS400", ...fields }), "emulator").ok).toBe(false);
+  });
+  it("無効でも詳細値を保存して復元できる", () => {
+    const file = { app: "emulator" as const, keepAlive: false, keepAliveOptions: { initialDelayMs: 90000, intervalMs: 30000, count: 4 }, connectionHold: "never" as const };
+    expect(parseTs5250File(stringifyTs5250File(file), "emulator")).toEqual({ ok: true, file });
+  });
+});

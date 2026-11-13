@@ -125,7 +125,7 @@ describe("キープアライブ", () => {
       TcpTransport.connect({ host: "127.0.0.1", port })
     );
     expect(calls.length, "setKeepAlive が呼ばれる").toBeGreaterThan(0);
-    expect(calls[0]).toEqual([true, 60_000]);
+    expect(calls[0]).toEqual([true, 60_000, 1000, 10]);
   });
 
   it("**待ち時間はホストサーバー側と同じ 60 秒**（同じ性質の待ちを別の値にしない）", async () => {

@@ -220,6 +220,8 @@ export abstract class ConfigStore {
     if (s.deviceName !== undefined) pub.deviceName = s.deviceName;
     if (s.deviceNameRetry !== undefined) pub.deviceNameRetry = s.deviceNameRetry;
     if (s.keepAlive !== undefined) pub.keepAlive = s.keepAlive;
+    if (s.keepAliveOptions !== undefined) pub.keepAliveOptions = s.keepAliveOptions;
+    if (s.connectionHold !== undefined) pub.connectionHold = s.connectionHold;
     if (s.associatedPrinter !== undefined) pub.associatedPrinter = s.associatedPrinter;
     // 関連付けるプリンターセッションは**参照**で返す（`system` と同じく、利用者が選び直せる形）
     if (s.associatedPrinterSession !== undefined) pub.associatedPrinterSession = makeRef(this.source, s.associatedPrinterSession);

@@ -1,13 +1,14 @@
 // ts5250 — Electron メインプロセス
-//   既存の Hono サーバー（packages/server）を Electron 内で起動し（TN5250 接続は Node が担う）、
-//   ビルド済み Web UI を BrowserWindow で開く。単一プロセス構成。
+//   既存の Hono サーバー（packages/server）を外部 Node.js 26.4+ で起動し、
+//   ビルド済み Web UI を BrowserWindow で開く。UI とサーバーは別プロセス。
 "use strict";
 const { app, BrowserWindow, shell, Menu } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
-const { pathToFileURL } = require("node:url");
+const { spawn } = require("node:child_process");
+let serverProcess;
 
 /**
  * アプリのルート（＝サーバーを動かす cwd）。serveStatic は cwd 相対で解決するので cwd を合わせる。
@@ -162,10 +163,17 @@ async function startServer() {
   argv.push("--connections", path.join(dataDir, "connections.json"));
   // 単一利用者アプリなので master key が無ければ自動生成して .env に保存（次回起動で loadDotEnv が拾う）
   argv.push("--auto-secret-key", "--secret-key-file", envPath);
-  const mod = await import(pathToFileURL(SERVER_MAIN).href);
-  startupLog("server module loaded");
-  await mod.main(argv); // serve() は非ブロッキング。listen 開始後に resolve
-  await waitForHealth(port);
+  // Electron 内蔵 Node の版に依存せず、確認間隔・回数を扱える Node 26.4+ で動かす。
+  serverProcess = spawn(process.env.TS5250_NODE_PATH || "node", [SERVER_MAIN, ...argv], {
+    cwd: ROOT, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"]
+  });
+  serverProcess.stdout.on("data", (chunk) => startupLog(chunk.toString()));
+  serverProcess.stderr.on("data", (chunk) => startupLog(chunk.toString()));
+  const failed = new Promise((_, reject) => {
+    serverProcess.once("error", reject);
+    serverProcess.once("exit", (code, signal) => reject(new Error(`サーバーが終了しました（code=${code}, signal=${signal}）。Node.js 26.4 以降の導入と TS5250_NODE_PATH を確認してください`)));
+  });
+  await Promise.race([waitForHealth(port), failed]);
   startupLog("server healthy");
   return port;
 }
@@ -275,7 +283,9 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+app.on("before-quit", () => { serverProcess?.kill(); });
+
 app.on("window-all-closed", () => {
-  // サーバーは同一プロセスなので終了で片付く
+  // 子サーバーは before-quit で終了させる
   if (process.platform !== "darwin") app.quit();
 });

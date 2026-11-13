@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 import { randomUUID } from "node:crypto";
 import { As400Error } from "@ts5250/base";
 import { VtSession, type VtEncoding, type VtSnapshot } from "@ts5250/vt";
@@ -56,6 +57,7 @@ export interface OpenVtOptions {
   connectTimeoutMs?: number;
   /** TCP キープアライブ（既定 false＝ACS と同じ。`VtSession` の `keepAlive`） */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
 }
 
 /** 1 フレーム（60fps）。これ以上細かくしても画面は追いつかない */
@@ -84,7 +86,8 @@ export class VtManager {
       ...(opts.scrollback !== undefined ? { scrollback: opts.scrollback } : {}),
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
       ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-      ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {})
+      ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {}),
+      ...(opts.keepAliveOptions !== undefined ? { keepAliveOptions: opts.keepAliveOptions } : {})
     });
     const entry: VtEntry = {
       id: randomUUID(),

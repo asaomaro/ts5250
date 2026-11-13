@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 /**
  * 接続設定の**唯一の解決点**。
  *
@@ -43,10 +44,12 @@ export interface ResolvedTarget {
   connect: ConnectOptions & {
     deviceNameRetry?: boolean;
     keepAlive?: boolean;
+    keepAliveOptions?: TcpKeepAliveOptions;
     rescueAction?: "hold" | "delete";
     transformTo?: string;
     /** アイドルタイムアウト（**ms** or `"never"`）。設定の「分」はここで変換済み */
     idleTimeoutMs?: number | "never";
+    connectionHoldMs?: number | "never";
   };
   /** **サーバー設定由来のセッションのときのみ**（信頼設定） */
   printerOutput?: PrinterOutputConfig;
@@ -191,9 +194,11 @@ export class ConfigResolver {
     const opts: ConnectOptions & {
       deviceNameRetry?: boolean;
       keepAlive?: boolean;
+      keepAliveOptions?: TcpKeepAliveOptions;
       rescueAction?: "hold" | "delete";
       transformTo?: string;
       idleTimeoutMs?: number | "never";
+      connectionHoldMs?: number | "never";
     } = { host: system.host };
     if (system.port !== undefined) opts.port = system.port;
     // 転記漏れがあると平文で繋がる。ポート省略時の既定は tls で 992／平文で 23 のため、
@@ -218,6 +223,7 @@ export class ConfigResolver {
       // キープアライブは種別を問わず（表示・プリンターと、待ち行列・メッセージの待ち受けがホストサーバーの接続へ渡す分）。ACS は端末もプリンターも
       // ホストサーバー（`jt400`）も既定で入れない（`20260930-display-keepalive-off`・`printer-keepalive-off`・`hostserver-keepalive-off`）
       if (session.keepAlive !== undefined) opts.keepAlive = session.keepAlive;
+      if (session.keepAliveOptions !== undefined) opts.keepAliveOptions = session.keepAliveOptions;
       // 関連付けプリンターは 5250 の表示だけ（スキーマでも弾くが、手で書き換えたファイルでプリンターの申告に混ぜない）
       if (session.associatedPrinter !== undefined && session.sessionType === "display" && (session.terminal ?? "5250") === "5250") {
         opts.associatedPrinter = session.associatedPrinter;
@@ -225,6 +231,7 @@ export class ConfigResolver {
       // 分 → ms の変換はここ 1 か所だけで行う（入口ごとに書くと片方が分のまま流れる）
       const idle = idleTimeoutToMs(session.idleTimeout);
       if (idle !== undefined) opts.idleTimeoutMs = idle;
+      if (session.connectionHold !== undefined) opts.connectionHoldMs = session.connectionHold === "never" ? "never" : session.connectionHold * 60000;
       if (session.sessionType === "printer") {
         if (session.rescueAction !== undefined) opts.rescueAction = session.rescueAction;
         if (session.transformTo !== undefined) opts.transformTo = session.transformTo;

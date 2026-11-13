@@ -201,13 +201,13 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 
 **`ebcdic` / `scs` / `hostserver` は端末プロトコル一式を引き込まずに単体で使えます**
 （「EBCDIC 変換だけ欲しい」「スプールを読みたいだけ」「SQL だけ叩きたい」に応えるため）。
-ESM、Node ≥ 20。
+ESM、Node.js ≥ 26.4。
 
 ---
 
 ## 🚀 クイックスタート
 
-**前提**: Node.js `^20.19.0 || >=22.12.0`（ビルドに使う vite / rolldown の要求。`package.json` の
+**前提**: Node.js `>=26.4.0`（TCP キープアライブの再試行間隔・回数を設定するため。`package.json` の
 `engines.node` が唯一の出どころで、起動スクリプトがそこを読んで確認します）、npm。IBM i 接続先（例: 無料の [PUB400.com](https://pub400.com) アカウント）。
 
 ### Web エミュレーター（ブラウザ）
@@ -247,12 +247,13 @@ start.bat             # Windows
 | `--ifs-upload-max-bytes` / `--ifs-upload-max-files` / `--ifs-upload-max-dirs` | 20 MiB / 500 / 500 | IFS フォルダ一括アップロードの上限（超えたら 1 件も置かない） |
 | `--dtaq-max-wait <sec>` | 60 | データ待ち行列の受信待機の上限（無限待ちを作らせない） |
 | `--idle-timeout <分\|never>` | `never`（切らない） | 操作・生存の合図が途絶えてから閉じるまでの時間（全体の既定）。ブラウザが心拍に応答している間は維持し、セッション設定で個別に上書きできる |
-| `--reconnect-grace <分\|never>` | 約 1.5 分（90 秒） | **ブラウザのタブを閉じた・回線が瞬断した**（WebSocket が閉じた）とき、ホストへ繋いだまま待つ時間。長くすると、閉じたタブがホストのジョブ・装置・`maxSessions` の枠をその間掴んだままになる（`never` にすると、タブを閉じるたびにセッションが残る） |
-| `--stalled-grace <分\|never>` | `never`（切らない） | **放置したタブが止まった**（メモリセーバー・スリープタブ・PC のスリープなどで、サーバーの心拍に約 2 分返事できなかった）とき、ホストへ繋いだまま待つ時間。既定は時間で切らず、戻ったタブは何時間後でも同じセッションに繋ぎ直せる（ACS と同じく、切るのは利用者かホスト）。分を指定すると `--reconnect-grace` より短くはならず、切れたときサーバーがホストへの接続をサインオフなしで閉じる（戻ったタブは「セッションは既に終了しています」になる）。閉じたタブの保持は延ばさない |
+| `--connection-hold <分\|never>` | `never`（無期限） | 5250 のブラウザ切断・ハートビート消失後、復帰を待つ共通の保持時間。`0` は即時切断。セッション設定 `connectionHold`（分）が優先します。明示した切断操作・正常に届いたタブ終了通知では保持しません |
+| `--reconnect-grace <分\|never>`（旧互換） | 約 1.5 分（90 秒） | **ブラウザのタブを閉じた・回線が瞬断した**（WebSocket が閉じた）とき、ホストへ繋いだまま待つ時間。長くすると、閉じたタブがホストのジョブ・装置・`maxSessions` の枠をその間掴んだままになる（`never` にすると、タブを閉じるたびにセッションが残る） |
+| `--stalled-grace <分\|never>`（旧互換） | `never`（切らない） | **放置したタブが止まった**（メモリセーバー・スリープタブ・PC のスリープなどで、サーバーの心拍に約 2 分返事できなかった）とき、ホストへ繋いだまま待つ時間。既定は時間で切らず、戻ったタブは何時間後でも同じセッションに繋ぎ直せる（ACS と同じく、切るのは利用者かホスト）。分を指定すると `--reconnect-grace` より短くはならず、切れたときサーバーがホストへの接続をサインオフなしで閉じる（戻ったタブは「セッションは既に終了しています」になる）。閉じたタブの保持は延ばさない |
 | `--max-watches <n>` | 4 | データ待ち行列・メッセージ待ち行列の**常駐監視**の同時本数。監視 1 本＝ホストサーバー接続 1 本を占有する |
 
 > ⏱ **無操作でセッションを閉じません**（既定）。ACS と同じ挙動で、アイドル対話ジョブの扱いは
-> ホストの方針（`QINACTITV`）に委ねます。ブラウザがハートビートに応答している間は、有限の `idleTimeout` を設定していても無操作だけでは切断しません。心拍は ts5250 内で処理し、ホストへは送信しません。切断の操作をするとその場で破棄されます。**タブ・ブラウザ・VS Code のパネルを閉じたときも、ページを離れる時点で切断を通知する**ので、その場で破棄されます（通知が届かなかった強制終了や回線断のときは、猶予＝既定 90 秒の `--reconnect-grace` の後に破棄されます）。
+> ホストの方針（`QINACTITV`）に委ねます。ブラウザがハートビートに応答している間は、有限の `idleTimeout` を設定していても無操作だけでは切断しません。心拍は ts5250 内で処理し、ホストへは送信しません。切断の操作をするとその場で破棄されます。**タブ・ブラウザ・VS Code のパネルを閉じたときも、ページを離れる時点で切断を通知する**ので、その場で破棄されます（通知が届かなかった強制終了や回線断のときは、`connectionHold` / `--connection-hold` の保持期限に従います（既定は無期限））。
 > **放置したタブが止まって心拍が途絶えたときは、時間では切りません**（既定。`--stalled-grace`）——戻れば同じセッションに繋ぎ直せます。
 > 止まったまま戻らなかったタブ（スリープ中に PC を落とした等）のセッションは、ホストが切るかサーバーを終了するまで残り、
 > `maxSessions` の枠とホストの装置を掴みます。セッション管理の一覧から開き直すか切断できます。停止したタブの保持時間を制限したい場合は `--stalled-grace 30` のように
@@ -280,7 +281,7 @@ electron.bat --build    :: 強制再ビルドしてから作る
 
 生成物は `electron/dist/` に出ます。Windows は
 **`ts5250-<version>-setup.exe`** の 1 ファイルで、これを配ればそのまま導入できます
-（**実行先に Node.js は不要**）。ワンクリック・ユーザー単位のインストーラなので
+（**実行先にも Node.js 26.4 以降が必要です**。PATH にない場合は `TS5250_NODE_PATH` に実行ファイルの絶対パスを指定します）。ワンクリック・ユーザー単位のインストーラなので
 `%LOCALAPPDATA%` に入り、**管理者権限は要りません**。以後の起動は即座です。
 
 > 📌 **portable（インストール不要の単一 exe）は採っていません。** portable のスタブは
@@ -666,7 +667,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 | 階層 | 持つもの |
 |---|---|
 | **システム** | `host` / `port` / `tls` / `ccsid`（既定）/ `signon`（資格情報）/ `ifsPath`（IFS 初期フォルダー）/ `sqlInitial`（SQL 初期テキスト） |
-| **セッション設定** | `system`（親システムの参照）/ `sessionType`（`display` / `printer` / `dtaqwatch` / `msgwatch`）/ `terminal`（`5250` / `3270` / `vt`）/ `deviceName` / `deviceNameRetry` / `keepAlive` / `associatedPrinter` / `associatedPrinterSession` / `associatedPrinterTimeout` / `closeAssociatedPrinterWithLastSession` / `screenSize` / `model3270` / `vtEncoding` / `ccsid`（上書き）/ `enhanced` / `watermark` / `autoStart` / `idleTimeout` / `rescueAction` / `transformTo` / `dtaqWatch` / `msgWatch` / `printer`・`pcCommand`・`webhook`（サーバー設定のみ） |
+| **セッション設定** | `system`（親システムの参照）/ `sessionType`（`display` / `printer` / `dtaqwatch` / `msgwatch`）/ `terminal`（`5250` / `3270` / `vt`）/ `deviceName` / `deviceNameRetry` / `keepAlive` / `keepAliveOptions` / `connectionHold` / `associatedPrinter` / `associatedPrinterSession` / `associatedPrinterTimeout` / `closeAssociatedPrinterWithLastSession` / `screenSize` / `model3270` / `vtEncoding` / `ccsid`（上書き）/ `enhanced` / `watermark` / `autoStart` / `idleTimeout` / `rescueAction` / `transformTo` / `dtaqWatch` / `msgWatch` / `printer`・`pcCommand`・`webhook`（サーバー設定のみ） |
 
 接続画面のシステム編集から IFS 初期フォルダーと SQL 初期テキストを設定できます。
 変更はタブを開き直したときに反映され、SQL は自動実行しません。
@@ -1470,3 +1471,35 @@ hllapi(&func, data, &len, &rc);   /* Connect Presentation Space */
 > （この開発環境に Windows / Excel が無いため）。エクスポート名と呼び出し規約は
 > `crates/hllapi/tools/check-dll.py` で機械的に検査しており、C ABI としては Linux の
 > `ctypes` で通っています。
+
+
+### ブラウザ切断後の保持と TCP キープアライブ
+
+通常版はセッション編集、VSCode 拡張版は接続前の設定画面から指定できます。
+5250 の **ブラウザ切断後の接続保持**は、通信断とハートビート消失を同じ時間で扱います。
+`connectionHold` は分単位の 0〜1440 または `"never"`（無期限）です。
+期限は断を検出してから数え、復帰できれば解除します。明示的な切断・正常なタブ終了通知では即時に終了します。
+3270 / VT の再接続保持とプリンターの常駐寿命は対象外です。
+CLI の `--connection-hold` が全体の既定（省略時無期限）を決め、個別設定が優先します。
+旧 `--reconnect-grace` / `--stalled-grace` だけを明示した場合は従来の別々の猶予を使います。
+両形式を併用すると新しい `--connection-hold` が優先します。
+
+TCP キープアライブは別の仕組みで、既定は無効のままです。有効時は次の詳細値を指定できます。
+
+```json
+{
+  "keepAlive": true,
+  "keepAliveOptions": { "initialDelayMs": 60000, "intervalMs": 15000, "count": 8 },
+  "connectionHold": 10
+}
+```
+
+- `initialDelayMs`：ホストとの無通信から最初の確認まで（既定 60000 ms）
+- `intervalMs`：応答がないときの再試行間隔（既定 1000 ms）
+- `count`：応答なしで送る確認回数（既定 10、1〜127）
+
+画面は秒、ファイルはミリ秒です。時間は 1〜32767 秒の整数を指定できます。
+確認開始後の切断までの目安は `intervalMs × count` ですが、OS の動作や送信中データの再送により厳密な期限にはなりません。
+古い Windows（build 1709 より前）では回数指定が OS に反映されません。
+ブラウザが停止しても、ホストとの確認通信は保持中の接続で続きます。
+ホスト側の無操作タイムアウトを延長する機能ではありません。

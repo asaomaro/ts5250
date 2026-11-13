@@ -103,7 +103,7 @@
 - **ピュアロジック層は Node API 非依存**（I/O は `transport/` に隔離。`node:*` import は
   **`transport/` のみ**許可）。tn5250 と hostserver の両方に同じ規約が掛かる
   （`eslint.config.js` の `no-restricted-imports` / `no-restricted-globals`）。
-- ESM / Node ≥ 20。周辺コードのスタイル（逐次 ByteReader・型で分岐を閉じる・オプショナルは存在時のみ付与）に合わせる。
+- ESM / Node ≥ 26.4（TCP keepalive の再試行間隔・回数指定）。周辺コードのスタイル（逐次 ByteReader・型で分岐を閉じる・オプショナルは存在時のみ付与）に合わせる。
 
 ### パッケージ分割と入口（バンドルサイズ）
 
@@ -383,7 +383,7 @@ REST は**経路を階層で分け**（`/api/systems` / `/api/sessions-config`�
   「ライブラリが見つからない」等で落ちる。
 - 検証スクリプトの実行は **2 ファイル渡し**:
   `node --env-file=.env --env-file=.env.verify scripts/<name>.mjs`
-  （`--env-file` の複数指定は Node 20.12+。`package.json` の `engines` はアプリの要件なので `>=20` のまま）
+  （`--env-file` の複数指定は Node 20.12+。`package.json` の `engines` は現在 `>=26.4.0`）
 - **アプリ本体（`start.sh` / `start.bat` / Electron）が読むのは `.env` だけ。** `.env.verify` を
   アプリに渡さない——サーバーが使わない変数を実行時環境に混ぜない。
 - 実機の特性（版数・CCSID・パスワードレベル・注意点）は `scripts/README.md`「検証に使う実機」と
