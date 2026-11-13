@@ -7,14 +7,16 @@
 # 使い方:
 #   ./vscode-extension.sh            # 未ビルド・ソースが新しければ自動ビルドしてから作る
 #   ./vscode-extension.sh --build    # 強制再ビルドしてから作る
+#   ./vscode-extension.sh --all      # 6つの OS/CPU 向けを作る
+#   ./vscode-extension.sh --target win32-x64  # 指定 OS/CPU 向けを作る
 #
 # 生成物は vscode-extension/ 直下（vsce の既定の出力先）に
-# `ts5250-vscode-<version>.vsix` として出ます。
+# `ts5250-vscode-<platform>-<version>.vsix` として出ます。
 set -euo pipefail
 cd "$(dirname "$0")"
 
 FORCE_BUILD=0
-[ "${1:-}" = "--build" ] && FORCE_BUILD=1
+if [ "${1:-}" = "--build" ]; then FORCE_BUILD=1; shift; fi
 
 command -v node >/dev/null 2>&1 || { echo "Node.js が必要です（必要版は package.json の engines.node）" >&2; exit 1; }
 # バージョンまで見る（start.sh/electron.shと同じ理由: 古い Node だとビルドが黙って失敗し、
@@ -52,7 +54,7 @@ echo "==> 配布用サーバー一式を組み立て（vscode-extension/server-s
 node vscode-extension/scripts/prepare-server.mjs
 
 echo "==> .vsix を作成"
-( cd vscode-extension && npx --yes @vscode/vsce package )
+( cd vscode-extension && npm run package -- "$@" )
 
 echo "==> 完了。vscode-extension/ 直下に .vsix ができています"
 ls -1 vscode-extension/*.vsix

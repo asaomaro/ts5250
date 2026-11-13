@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { ServiceManager } from "./serviceManager.js";
 import { ExtensionSecretCrypto } from "./secretCrypto.js";
@@ -41,6 +41,13 @@ function resolveServerPaths(context: vscode.ExtensionContext): { serverMainPath:
   };
 }
 
+/** 配布版は同梱 Node を使う。PATH の探索や実行時ダウンロードは行わない。 */
+export function resolveNodePath(context: Pick<vscode.ExtensionContext, "extensionMode" | "extensionUri">, override?: string, platform = process.platform): string {
+  if (override?.trim()) return override;
+  if (context.extensionMode !== vscode.ExtensionMode.Production) return "node";
+  return join(context.extensionUri.fsPath, "server-stage", "runtime", platform === "win32" ? "node.exe" : "node");
+}
+
 /** ハートビートの間隔（design.md「振る舞いの詳細」の調停プロトコル） */
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -68,10 +75,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     webRootPath,
     connectionsPath: join(globalStorageDir, "connections.json"),
     profilesPath: join(globalStorageDir, "profiles.json"),
-    nodePath: vscode.workspace.getConfiguration("ts5250").get<string>("nodePath") || "node",
+    nodePath: resolveNodePath(context, vscode.workspace.getConfiguration("ts5250").get<string>("nodePath")),
     secretKeyFilePath: join(globalStorageDir, ".env"),
     windowId: randomUUID(),
-    ...buildIdOption(serverMainPath, webRootPath),
+    ...buildIdOption(serverMainPath, webRootPath, join(context.extensionUri.fsPath, "server-stage", "runtime", "runtime.json")),
     // spawn直後、成否が分かる前から流す（`serviceManager.ts`の`onChildOutput`コメント参照）。
     // 以前はここ（`acquire()`が返した後）でしか配線しておらず、起動に失敗したときの
     // 診断出力が失われていた
@@ -159,10 +166,11 @@ export function deactivate(): void {
  * **版数ではなく中身から作る**——`.vsix`の版数は据え置きのまま中身だけ変わるため。`embed.html`は
  * Viteが付けるハッシュ付きの資産名を含むので、Web UIが変われば必ず変わる。読めなければ比べない
  */
-function buildIdOption(serverMainPath: string, webRootPath: string): { buildId?: string } {
+function buildIdOption(serverMainPath: string, webRootPath: string, runtimeManifest: string): { buildId?: string } {
   try {
     const h = createHash("sha256");
     h.update(readFileSync(serverMainPath));
+    if (existsSync(runtimeManifest)) h.update(readFileSync(runtimeManifest));
     h.update(readFileSync(join(webRootPath, "embed.html")));
     return { buildId: h.digest("hex").slice(0, 16) };
   } catch {

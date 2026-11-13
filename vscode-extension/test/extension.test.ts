@@ -39,7 +39,7 @@ vi.mock("vscode", () => ({
   ExtensionMode: { Production: 1, Development: 2, Test: 3 }
 }));
 
-import { activate, deactivate } from "../src/extension.js";
+import { activate, deactivate, resolveNodePath } from "../src/extension.js";
 import { mockExtensionContext } from "./vscode-mock.js";
 
 interface CapturedDeps {
@@ -190,5 +190,23 @@ describe("ハートビート", () => {
 describe("deactivate", () => {
   it("例外を投げない（後片付けはcontext.subscriptions経由）", () => {
     expect(() => deactivate()).not.toThrow();
+  });
+});
+
+
+describe("サーバー専用 Node の選択", () => {
+  it("配布版はPATHではなく同梱実行ファイルを使う", () => {
+    const context = makeContext(1) as never;
+    expect(resolveNodePath(context, undefined, "linux")).toBe("/repo/vscode-extension/server-stage/runtime/node");
+    expect(resolveNodePath(context, "", "win32")).toBe("/repo/vscode-extension/server-stage/runtime/node.exe");
+    expect(resolveNodePath(context, "  ", "darwin")).toBe("/repo/vscode-extension/server-stage/runtime/node");
+  });
+  it("外部Nodeは明示したときだけ使い、開発版はビルド用Nodeを使う", () => {
+    expect(resolveNodePath(makeContext(1) as never, "/custom/node", "linux")).toBe("/custom/node");
+    expect(resolveNodePath(makeContext(2) as never, undefined, "linux")).toBe("node");
+  });
+  it("ProductionのServiceManagerにも同梱パスを渡す", async () => {
+    await activate(makeContext(1) as never);
+    expect(ServiceManagerCtor.mock.calls.at(-1)?.[0]).toMatchObject({ nodePath: "/repo/vscode-extension/server-stage/runtime/node" });
   });
 });

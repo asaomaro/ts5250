@@ -11,7 +11,7 @@ import { dirname } from "node:path";
  *
  * `packages/server`の`main()`はSIGINT/SIGTERMで`process.exit(0)`する
  * （research F3）ため、**必ず別プロセスとしてspawnする**（design.md「設計方針1」）。
- * TCP keepalive の間隔・回数を指定するため、サーバーは外部 Node.js 26.4+ で起動する。
+ * TCP keepalive の間隔・回数を指定するため、サーバーは同梱 Node.js 26.4+（明示指定時は外部 Node）で起動する。
  * 拡張ホスト内蔵 Node のバージョンとは独立させる。
  */
 
@@ -46,7 +46,7 @@ export interface ServiceManagerOptions {
   connectionsPath: string;
   /** PC コマンド等の信頼設定。拡張専用のサーバー設定ファイル */
   profilesPath?: string;
-  /** 外部 Node.js 26.4+。VSCode 内蔵 Node は対応版とは限らない */
+  /** サーバー専用 Node.js の実行ファイル。配布版は同梱 Node を指定する */
   nodePath?: string;
   /** `--secret-key-file`に渡す値（`context.globalStorageUri/.env`） */
   secretKeyFilePath: string;

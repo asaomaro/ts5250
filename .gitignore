@@ -61,3 +61,6 @@ IBMiAccess_v1r1/
 
 # scripts/make-bin.mjs が作る起動ファイル
 /bin/
+
+# 公式 Node 配布物のビルド用キャッシュ（VSIX には stage/runtime の実体だけを入れる）
+vscode-extension/.node-cache/
