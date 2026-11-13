@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 /**
  * 接続設定の型（システム / セッション設定の 2 階層）。
  *
@@ -300,6 +301,13 @@ const sessionBase = {
    * （ファイアウォールのアイドル切断など）のセッションだけ true にする。常駐プリンターが 15 分のアイドルで届かなくなる環境や、待ち行列・メッセージの常駐監視が落とされる環境はその例
    */
   keepAlive: z.boolean().optional(),
+  keepAliveOptions: z.object({
+    initialDelayMs: z.number().int().min(1000).max(32767000).multipleOf(1000).optional(),
+    intervalMs: z.number().int().min(1000).max(32767000).multipleOf(1000).optional(),
+    count: z.number().int().min(1).max(127).optional()
+  }).strict().optional(),
+  /** ブラウザ切断・心拍消失の両方に適用する保持時間（分）。0 は即時、never は無期限 */
+  connectionHold: z.union([z.literal("never"), z.number().int().min(0).max(1440)]).optional(),
   /**
    * **関連付けプリンターの装置名**（表示の 5250 だけ。`20260921-associated-printer`）。接続時に telnet で IBMASSOCPRT として申告し、
    * ホストはジョブの印刷装置をその装置にする（ACS の「プリンターの関連付け」で装置名を書く方式。実測）。
@@ -690,6 +698,8 @@ export interface PublicSession {
   deviceName?: string;
   deviceNameRetry?: boolean;
   keepAlive?: boolean;
+  connectionHold?: number | "never";
+  keepAliveOptions?: TcpKeepAliveOptions;
   /** 5250 の display のみ。関連付けプリンターの装置名（IBMASSOCPRT。信頼設定ではない） */
   associatedPrinter?: string;
   /** 5250 の display のみ。関連付けるプリンターセッションの設定（同じファイルのプリンターの**参照**。`srv:` / `own:`） */

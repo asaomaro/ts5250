@@ -63,6 +63,8 @@ export interface SessionConfigForm {
   deviceName?: string;
   deviceNameRetry?: boolean;
   keepAlive?: boolean;
+  keepAliveOptions?: { initialDelayMs?: number | undefined; intervalMs?: number | undefined; count?: number | undefined };
+  connectionHold?: number | "never";
   /** 5250 の display のみ。関連付けプリンターの装置名（ホストへ IBMASSOCPRT として申告する） */
   associatedPrinter?: string;
   /** 5250 の display のみ。関連付けるプリンターセッションの設定の**参照**（`srv:` / `own:`。同じ保存先のプリンターの設定。装置名の方式とは排他） */

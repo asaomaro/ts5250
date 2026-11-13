@@ -9,7 +9,7 @@
 #
 # 生成物は electron/dist/ に出ます。**Windows は単一のインストーラ exe**
 # （ワンクリック・ユーザー単位。%LOCALAPPDATA% に入るので管理者権限は不要。
-# 実行先に Node.js も不要）、Linux は AppImage、macOS は dmg。
+# 実行先にも Node.js 26.4 以降が必要）、Linux は AppImage、macOS は dmg。
 # 実行時依存はアプリの中に入ります（electron/scripts/prepare-app.mjs が組み立て）。
 #
 # **Windows 用 exe は Windows 上で `electron.bat` を実行して作ります**——

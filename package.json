@@ -6,7 +6,7 @@
   "description": "AS400 (IBM i) 5250 MCP server + Web emulator — pure TypeScript TN5250 implementation",
   "type": "module",
   "engines": {
-    "node": "^20.19.0 || >=22.12.0"
+    "node": ">=26.4.0"
   },
   "workspaces": [
     "packages/*",
@@ -20,7 +20,7 @@
     "gen:icons": "npm run gen:icons -w @ts5250/web-ui"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.6.6",
     "eslint": "^10.7.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.64.0",

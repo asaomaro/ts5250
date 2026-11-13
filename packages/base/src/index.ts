@@ -78,3 +78,5 @@ export { deviceEnvFor, type DeviceEnv, type KatakanaVariant } from "./device-env
 export { parseCsv, type CsvParseResult } from "./csv-parse.js";
 /** SQL の複数文分割。純テキスト処理なので UI から直接使う（表も I/O も引き込まない） */
 export { splitSqlStatements, summarizeSql, type SqlStatement } from "./split-statements.js";
+
+export { TCP_KEEPALIVE_DEFAULTS, tcpKeepAliveArgs, type TcpKeepAliveOptions } from "./tcp-keepalive.js";

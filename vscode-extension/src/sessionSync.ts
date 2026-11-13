@@ -28,6 +28,8 @@ export async function syncSession(input: SessionSyncInput, opts: SessionSyncOpti
   };
   if (input.deviceName !== undefined) body.deviceName = input.deviceName;
   if (input.keepAlive !== undefined) body.keepAlive = input.keepAlive;
+  if (input.keepAliveOptions !== undefined) body.keepAliveOptions = input.keepAliveOptions;
+  if (!printer && input.terminal !== "3270" && input.connectionHold !== undefined) body.connectionHold = input.connectionHold;
   if (input.deviceNameRetry !== undefined) body.deviceNameRetry = input.deviceNameRetry;
   if (printer) {
     if (input.printer !== undefined) body.printer = input.printer;

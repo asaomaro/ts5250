@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 /**
  * DDM（レコードレベルアクセス）で物理ファイルにレコードを追記する。
  *
@@ -97,6 +98,7 @@ export interface DdmConnectOptions {
    * 途中の機器に無通信の接続を落とされる環境だけ true にする（セッション設定 `keepAlive`。`20260930-hostserver-keepalive-off`）
    */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
   resolvePort?: boolean;
   timeoutMs?: number;
 }
@@ -164,7 +166,8 @@ export class DdmConnection {
       port,
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
       ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
-      ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {})
+      ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {}),
+      ...(opts.keepAliveOptions !== undefined ? { keepAliveOptions: opts.keepAliveOptions } : {})
     });
 
     try {

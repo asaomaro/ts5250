@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 /**
  * ホストサーバー（SQL・コマンド・スプール・IFS）接続の共通の開き方。
  *
@@ -23,6 +24,7 @@ export interface HostServerAuth {
   tls?: boolean | { rejectUnauthorized?: boolean; ca?: string | string[] };
   /** TCP キープアライブ（既定 false＝ACS 同梱の `jt400` と同じ。常駐の待ち受けが途中の機器に落とされる環境だけ。`20260930-hostserver-keepalive-off`） */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
 }
 
 /**
@@ -45,7 +47,8 @@ export function hostAuthFrom(opts: ConnectOptions): HostServerAuth {
     user: opts.user,
     password: opts.password,
     ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
-    ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {})
+    ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {}),
+      ...(opts.keepAliveOptions !== undefined ? { keepAliveOptions: opts.keepAliveOptions } : {})
   };
 }
 

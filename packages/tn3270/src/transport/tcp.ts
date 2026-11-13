@@ -1,3 +1,6 @@
+import { isIP } from "node:net";
+import { tcpKeepAliveArgs } from "@ts5250/base";
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 import { Socket, connect as netConnect } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import { As400Error, withSocketHint } from "@ts5250/base";
@@ -21,6 +24,7 @@ export interface TcpConnectOptions {
    * 入れると一時的な回線断で無通信のあいだに探査が失敗して接続が落ちる。`tn5250/src/transport/tcp.ts` の注記、`20260930-display-keepalive-off`）
    */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
 }
 
 /**
@@ -39,13 +43,13 @@ export interface TcpConnectOptions {
  *
  *   1. **経路上の機器に「使っている」と見せ続ける**——NAT やファイアウォールの
  *      アイドル表を更新するので、そもそも落とされない
- *   2. 落とされた場合に**気づけるようにする**——ただし探査の間隔と回数は OS の設定なので、
+ *   2. 落とされた場合に**気づけるようにする**——探査の間隔と回数は `keepAliveOptions` で設定でき、
  *      死んだと判定するまで**さらに数分**かかる（Linux の既定で 75 秒 × 9 回）。
  *      その間に届いた帳票は取りこぼす。だから「気づく」に頼らず「落とされない」を狙う
  *
- * 値はホストサーバー側と揃える——**同じ性質の待ちを別の値にしない**。
+ * 既定の開始待ちはホストサーバー側と共通（`@ts5250/base` の `tcpKeepAliveArgs`）。
  */
-const KEEPALIVE_DELAY_MS = 60_000;
+
 
 export class TcpTransport implements Transport {
   private dataFn: ((data: Uint8Array) => void) | undefined;
@@ -59,7 +63,9 @@ export class TcpTransport implements Transport {
     socket.on("close", () => this.emitClose("socket closed"));
   }
 
-  static connect(opts: TcpConnectOptions): Promise<TcpTransport> {
+  static async connect(opts: TcpConnectOptions): Promise<TcpTransport> {
+    // 不正な時間設定ではソケットを作らない（接続を開始してから例外にすると残留する）。
+    if (opts.keepAlive !== false) tcpKeepAliveArgs(opts.keepAliveOptions);
     return opts.tls ? this.connectTls(opts) : this.connectPlain(opts);
   }
 
@@ -69,7 +75,7 @@ export class TcpTransport implements Transport {
       const socket = netConnect({ host: opts.host, port: opts.port });
       socket.setNoDelay(true);
       // **無通信でも生死が分かるようにする**（上の定数の注記）
-      if (opts.keepAlive !== false) socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
+      if (opts.keepAlive !== false) socket.setKeepAlive(...tcpKeepAliveArgs(opts.keepAliveOptions));
       const timer = setTimeout(() => {
         socket.destroy();
         reject(
@@ -105,13 +111,14 @@ export class TcpTransport implements Transport {
       const socket: TLSSocket = tlsConnect({
         host: opts.host,
         port: opts.port,
-        servername: opts.host,
+        // Node 26 は IP を SNI 名として受け付けない。証明書の宛先検証は host で継続する。
+        ...(isIP(opts.host) === 0 ? { servername: opts.host } : {}),
         rejectUnauthorized,
         ...(tlsOpts.ca !== undefined ? { ca: tlsOpts.ca } : {})
       });
       socket.setNoDelay(true);
       // **無通信でも生死が分かるようにする**（上の定数の注記）
-      if (opts.keepAlive !== false) socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
+      if (opts.keepAlive !== false) socket.setKeepAlive(...tcpKeepAliveArgs(opts.keepAliveOptions));
       const timer = setTimeout(() => {
         socket.destroy();
         reject(

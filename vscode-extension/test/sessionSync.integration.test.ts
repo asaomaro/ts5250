@@ -28,7 +28,7 @@ describe("VSCode の PC コマンド設定の同期", () => {
         documentUri: "file:///test.ts5250emu", name: "test", host: "TESTHOST",
         ccsid: 930, katakanaVariant: "katakana-ex" as const, user: "TESTUSER",
         password: "test-password-only", deviceName: "TESTDEV", screenSize: "27x132" as const,
-        enhanced: true, allowPcCommand: true, keepAlive: true, deviceNameRetry: true, associatedPrinter: "PRT_TEST", pcCommand: { allow: ["prog:notepad"], timeoutMs: 5000 }
+        enhanced: true, allowPcCommand: true, keepAlive: true, keepAliveOptions: { initialDelayMs: 90000, intervalMs: 10000, count: 6 }, connectionHold: 5, deviceNameRetry: true, associatedPrinter: "PRT_TEST", pcCommand: { allow: ["prog:notepad"], timeoutMs: 5000 }
       };
       const ref = await syncSession(input, opts);
       expect(ref).toMatch(/^srv:/);
@@ -42,7 +42,7 @@ describe("VSCode の PC コマンド設定の同期", () => {
       const enabled = await list();
       expect(enabled.editable).toBe(true);
       expect(enabled.sessions).toHaveLength(1);
-      expect(stored(ref)).toMatchObject({ pcCommand: { enabled: true, allow: ["prog:notepad"], timeoutMs: 5000 }, enhanced: true, keepAlive: true, deviceNameRetry: true, associatedPrinter: "PRT_TEST", deviceName: "TESTDEV", screenSize: "27x132", katakanaVariant: "katakana-ex" });
+      expect(stored(ref)).toMatchObject({ pcCommand: { enabled: true, allow: ["prog:notepad"], timeoutMs: 5000 }, enhanced: true, keepAlive: true, keepAliveOptions: { initialDelayMs: 90000, intervalMs: 10000, count: 6 }, connectionHold: 5, deviceNameRetry: true, associatedPrinter: "PRT_TEST", deviceName: "TESTDEV", screenSize: "27x132", katakanaVariant: "katakana-ex" });
       const saved = readFileSync(profilesPath, "utf8");
       expect(saved).not.toContain(input.password);
       expect(JSON.parse(saved).systems).toHaveLength(1);

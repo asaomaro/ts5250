@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseReconnectGrace, parseStalledGrace, sessionManagerOptions } from "../src/main.js";
+import { parseConnectionHold, parseReconnectGrace, parseStalledGrace, sessionManagerOptions } from "../src/main.js";
 import { DEFAULT_RECONNECT_GRACE_MS, DEFAULT_STALLED_GRACE_MS } from "../src/session-manager.js";
 
 /**
@@ -38,7 +38,7 @@ describe("SessionManager へ渡す寿命の設定", () => {
 
   it("指定が無ければキーごと付けない（マネージャの既定＝閉じたら 90 秒・心拍が途絶えたら never に任せる）", () => {
     const o = sessionManagerOptions({ idleTimeoutMs: undefined, reconnectGraceMs: undefined, stalledGraceMs: undefined });
-    expect(o).toEqual({});
+    expect(o).toEqual({ connectionHoldMs: "never" });
     expect("reconnectGraceMs" in o).toBe(false);
     expect(DEFAULT_RECONNECT_GRACE_MS).toBe(90_000);
     expect(DEFAULT_STALLED_GRACE_MS).toBe("never");
@@ -60,5 +60,18 @@ describe("--stalled-grace（心拍が途絶えて切れたときの猶予）", (
   it("SessionManager へ渡す（指定が無ければキーごと付けない）", () => {
     expect(sessionManagerOptions({ idleTimeoutMs: undefined, reconnectGraceMs: undefined, stalledGraceMs: 900_000 })).toEqual({ stalledGraceMs: 900_000 });
     expect("stalledGraceMs" in sessionManagerOptions({ idleTimeoutMs: undefined, reconnectGraceMs: undefined, stalledGraceMs: undefined })).toBe(false);
+  });
+});
+
+
+describe("--connection-hold", () => {
+  it("0・分・無期限を受理する", () => {
+    expect(parseConnectionHold("0")).toBe(0);
+    expect(parseConnectionHold("10")).toBe(600000);
+    expect(parseConnectionHold("never")).toBe("never");
+    for (const value of ["-1", "0.5", "1441", "abc", "", undefined]) expect(() => parseConnectionHold(value)).toThrow(/--connection-hold/);
+  });
+  it("新設定が旧設定より優先し、0 を落とさない", () => {
+    expect(sessionManagerOptions({ idleTimeoutMs: undefined, reconnectGraceMs: 90000, stalledGraceMs: "never", connectionHoldMs: 0 })).toMatchObject({ connectionHoldMs: 0 });
   });
 });

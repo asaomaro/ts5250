@@ -45,7 +45,7 @@ const src = (rel: string): string => readFileSync(join(repo, rel), "utf8");
 
 describe("TCP キープアライブ", () => {
   it.each(SOCKET_SOURCES)("%s が setKeepAlive を呼ぶ", (rel) => {
-    expect(src(rel)).toMatch(/setKeepAlive\(true,/u);
+    expect(src(rel)).toMatch(/setKeepAlive\(\.\.\.tcpKeepAliveArgs\(opts.keepAliveOptions\)\)/u);
   });
 
   it("**平文と TLS の両方に入っている**（片方だけだと TLS の接続が黙って死ぬ）", () => {
@@ -54,7 +54,7 @@ describe("TCP キープアライブ", () => {
       "packages/tn3270/src/transport/tcp.ts",
       "packages/vt/src/transport/tcp.ts"
     ]) {
-      const calls = src(rel).match(/socket\.setKeepAlive\(true,/gu) ?? [];
+      const calls = src(rel).match(/socket\.setKeepAlive\(\.\.\.tcpKeepAliveArgs\(/gu) ?? [];
       expect(calls.length, `${rel} は平文・TLS の 2 か所`).toBe(2);
     }
   });

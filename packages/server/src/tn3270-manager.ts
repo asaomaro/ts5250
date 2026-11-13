@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 import { randomUUID } from "node:crypto";
 import { As400Error } from "@ts5250/base";
 import { Tn3270Session } from "@ts5250/tn3270";
@@ -42,6 +43,7 @@ export interface Open3270Options {
   connectTimeoutMs?: number;
   /** TCP キープアライブ（既定 false＝ACS と同じ。`Tn3270Session` の `keepAlive`） */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
   /**
    * 装置名（LU 名）。**渡し方はホストで変わる**——IBM i は NEW-ENVIRON の `DEVNAME`、
    * それ以外は端末タイプの `@名前`。どちらにするかは telnet 層が交渉を見て決める。
@@ -66,7 +68,8 @@ export class Tn3270Manager {
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
       ...(opts.deviceName !== undefined ? { deviceName: opts.deviceName } : {}),
       ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-      ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {})
+      ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {}),
+      ...(opts.keepAliveOptions !== undefined ? { keepAliveOptions: opts.keepAliveOptions } : {})
     });
     const entry: Tn3270Entry = {
       id: randomUUID(),

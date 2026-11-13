@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 /**
  * database ホストサーバーへの接続。
  *
@@ -73,6 +74,7 @@ export interface DbConnectOptions {
    * 途中の機器に無通信の接続を落とされる環境だけ true にする（セッション設定 `keepAlive`。`20260930-hostserver-keepalive-off`）
    */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
   /** true でポートマッパー(449)に問い合わせる。既定 false */
   resolvePort?: boolean;
   timeoutMs?: number;
@@ -129,6 +131,7 @@ export class DbConnection {
       port,
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
       ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {}),
+      ...(opts.keepAliveOptions !== undefined ? { keepAliveOptions: opts.keepAliveOptions } : {}),
       timeoutMs
     });
     // **接続を 1 度包む**——request() の呼び出しごとに書くと 1 箇所の書き忘れが穴になる

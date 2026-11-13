@@ -83,6 +83,7 @@ interface Args {
   reconnectGraceMs: number | "never" | undefined;
   /** `--stalled-grace`（ms または `"never"`）。未指定は `DEFAULT_STALLED_GRACE_MS`（`"never"`） */
   stalledGraceMs: number | "never" | undefined;
+  connectionHoldMs?: number | "never";
 }
 
 /**
@@ -128,6 +129,11 @@ export function parseIdleTimeout(raw: string | undefined): number | "never" {
  * 長くするほど、タブが戻ったとき同じセッションに繋ぎ直せる——代わりに、戻らないタブの装置とジョブをその間ホストで掴んだままにする。
  * `0` は受け付けない（`--idle-timeout` と同じく、未設定・転記漏れと見分けが付かないため）。
  */
+/** ブラウザ切断理由によらない共通の保持時間。0 は即時切断。 */
+export function parseConnectionHold(raw: string | undefined): number | "never" {
+  return raw === "0" ? 0 : parseGraceMinutes(raw, "--connection-hold");
+}
+
 export function parseReconnectGrace(raw: string | undefined): number | "never" {
   return parseGraceMinutes(raw, "--reconnect-grace");
 }
@@ -240,6 +246,8 @@ function parseArgs(argv: string[]): Args {
     } else if (a === "--reconnect-grace") {
       // 転送（ブラウザ ↔ サーバー）が落ちたセッションをホストへ繋いだまま保つ時間。既定は 90 秒（`parseReconnectGrace`）
       args.reconnectGraceMs = parseReconnectGrace(argv[++i]);
+    } else if (a === "--connection-hold") {
+      args.connectionHoldMs = parseConnectionHold(argv[++i]);
     } else if (a === "--stalled-grace") {
       // 心拍が途絶えて切れたセッションを保つ時間。既定は never（`parseStalledGrace`）
       args.stalledGraceMs = parseStalledGrace(argv[++i]);
@@ -267,12 +275,16 @@ function parseArgs(argv: string[]): Args {
 }
 
 /** `SessionManager` へ渡す寿命の設定（起動オプションから。指定が無いものは渡さず、マネージャの既定に任せる） */
-export function sessionManagerOptions(args: Pick<Args, "idleTimeoutMs" | "reconnectGraceMs" | "stalledGraceMs">): {
+export function sessionManagerOptions(args: Pick<Args, "idleTimeoutMs" | "reconnectGraceMs" | "stalledGraceMs" | "connectionHoldMs">): {
   idleTimeoutMs?: number | "never";
   reconnectGraceMs?: number | "never";
   stalledGraceMs?: number | "never";
+  connectionHoldMs?: number | "never";
 } {
   return {
+    // 明示した旧オプションは互換動作。通常の起動では閉じ方を問わず無期限で待つ。
+    ...(args.connectionHoldMs !== undefined ? { connectionHoldMs: args.connectionHoldMs }
+      : args.reconnectGraceMs === undefined && args.stalledGraceMs === undefined ? { connectionHoldMs: "never" as const } : {}),
     ...(args.idleTimeoutMs !== undefined ? { idleTimeoutMs: args.idleTimeoutMs } : {}),
     ...(args.reconnectGraceMs !== undefined ? { reconnectGraceMs: args.reconnectGraceMs } : {}),
     ...(args.stalledGraceMs !== undefined ? { stalledGraceMs: args.stalledGraceMs } : {})
@@ -325,6 +337,10 @@ function buildAuth(usersPath: string | undefined, cookieSecure: boolean): AuthCo
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const [major, minor] = process.versions.node.split(".").map(Number);
+  if (major! < 26 || (major === 26 && minor! < 4)) {
+    throw new Error("ts5250 サーバーには Node.js 26.4 以降が必要です");
+  }
   const args = parseArgs(argv);
 
   // ユーティリティ: パスワードハッシュを出力して終了（users.json 作成補助）

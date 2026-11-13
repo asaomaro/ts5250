@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ConnectionTimingFields from "./ConnectionTimingFields.vue";
+import { embedConnectionError } from "../embed-protocol.js";
 /**
  * システム / セッション設定のカード。**その場でフォームに開く**（専用の設定画面を持たない）。
  *
@@ -105,6 +107,8 @@ const sesForm = reactive<SesFormState>({
   deviceName: "",
   deviceNameRetry: false,
   keepAlive: false,
+  keepAliveOptions: undefined,
+  connectionHold: "never",
   enhanced: false,
   associatedPrinter: "",
   associatedPrinterSession: "",
@@ -378,6 +382,8 @@ function loadSession(): void {
   sesForm.deviceName = s.deviceName ?? "";
   sesForm.deviceNameRetry = s.deviceNameRetry ?? false;
   sesForm.keepAlive = s.keepAlive ?? false;
+  sesForm.keepAliveOptions = s.keepAliveOptions;
+  sesForm.connectionHold = s.connectionHold ?? "never";
   sesForm.associatedPrinter = s.associatedPrinter ?? "";
   sesForm.associatedPrinterSession = s.associatedPrinterSession ?? "";
   sesForm.associatedPrinterTimeout = s.associatedPrinterTimeout ?? 5;
@@ -505,6 +511,7 @@ function cancel(): void {
 }
 
 function validate(): string | undefined {
+  if (props.kind === "session") { const error = embedConnectionError(sesForm); if (error) return error; }
   if (props.kind === "system") {
     if (!sysForm.name?.trim()) return "名前を入力してください";
     if (!sysForm.host?.trim()) return "ホストを入力してください";
@@ -554,6 +561,7 @@ async function save(): Promise<void> {
       }
     } else {
       const form = { ...sesForm, name: sesForm.name!.trim() } as SessionConfigForm;
+      if (form.sessionType !== "display" || form.terminal !== "5250") delete form.connectionHold;
       if (sesForm.sessionType !== "printer" && !(sesForm.sessionType === "display" && sesForm.terminal === "5250")) delete form.deviceNameRetry;
       // transformTo は printer 専用。空文字だとサーバーの min(1) で 400 になるので、
       // sessionType によらず「空なら送らない」を常に通す（display の既定 "" 対策）
@@ -1081,6 +1089,9 @@ const infoRows = computed(() => {
           <span class="cap">キープアライブ</span>
           <span class="tv"><input v-model="sesForm.keepAlive" data-setting="keepAlive" type="checkbox" /> TCP キープアライブを使う（既定は無効）</span>
         </label>
+        <ConnectionTimingFields :enabled="sesForm.keepAlive === true" :options="sesForm.keepAliveOptions" :hold="sesForm.connectionHold"
+          :show-hold="sesForm.sessionType === 'display' && sesForm.terminal === '5250'"
+          @options="sesForm.keepAliveOptions = $event" @hold="sesForm.connectionHold = $event" />
         <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === '5250'" class="row">
           <span class="cap">拡張5250 GUI</span>
           <span class="tv"><input v-model="sesForm.enhanced" data-setting="enhanced" type="checkbox" /> ウィンドウ・選択フィールド等を申告する</span>

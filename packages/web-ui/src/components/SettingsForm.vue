@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ConnectionTimingFields from "./ConnectionTimingFields.vue";
 /**
  * 接続情報の設定フォーム（`embed.html`専用。design.md「設計方針6」）。
  *
@@ -43,6 +44,8 @@ const allowPcCommand = ref(props.initial?.allowPcCommand ?? false);
 const enhanced = ref(props.initial?.enhanced ?? false);
 const deviceNameRetry = ref(props.initial?.deviceNameRetry ?? false);
 const keepAlive = ref(props.initial?.keepAlive ?? false);
+const keepAliveOptions = ref(props.initial?.keepAliveOptions);
+const connectionHold = ref(props.initial?.connectionHold ?? "never");
 const associatedPrinter = ref(props.initial?.associatedPrinter ?? "");
 const pcAllow = ref(props.initial?.pcCommand?.allow?.join("\n") ?? "");
 const pcTimeoutSec = ref(props.initial?.pcCommand?.timeoutMs !== undefined ? String(props.initial.pcCommand.timeoutMs / 1000) : "");
@@ -127,6 +130,8 @@ function buildValues(): SettingsFormValues {
     if (deviceName.value !== "") v.deviceName = deviceName.value;
     v.deviceNameRetry = deviceNameRetry.value;
     v.keepAlive = keepAlive.value;
+    if (keepAliveOptions.value !== undefined) v.keepAliveOptions = keepAliveOptions.value;
+    if (props.app === "emulator" && terminal.value === "5250") v.connectionHold = connectionHold.value;
   }
   if (props.app === "printer") {
     const printer: NonNullable<SettingsFormValues["printer"]> = {};
@@ -152,7 +157,7 @@ function build(): SettingsFormValues | undefined {
 // **`flush: "sync"`**——入力の直後（同じ処理の中）に「接続」が押されても、その時点で呼び出し側が変更を知っているようにする。
 // 既定（描画前にまとめて）だと、入力と押下が同じ処理で起きたとき`change`が押下より後に届き、保存を飛ばして古い設定で繋いだ
 // （実際の VSCode で再現。D34）
-watch([host, port, tls, codePageId, spoolCcsid, terminal, screenSize, deviceName, allowPcCommand, enhanced, deviceNameRetry, keepAlive, associatedPrinter, pcAllow, pcTimeoutSec, autoPdfDir, autoPrint, ifsPath, sqlInitial, wmForm, user, password], () => emit("change", build()), {
+watch([host, port, tls, codePageId, spoolCcsid, terminal, screenSize, deviceName, allowPcCommand, enhanced, deviceNameRetry, keepAlive, keepAliveOptions, connectionHold, associatedPrinter, pcAllow, pcTimeoutSec, autoPdfDir, autoPrint, ifsPath, sqlInitial, wmForm, user, password], () => emit("change", build()), {
   deep: true,
   flush: "sync"
 });
@@ -242,6 +247,8 @@ function buildWatermark(): WatermarkValue | undefined {
         </fieldset>
         <fieldset v-else-if="g === 'device'" class="group">
           <legend>{{ app === "printer" ? "プリンター装置" : "端末" }}</legend>
+          <ConnectionTimingFields :enabled="keepAlive" :options="keepAliveOptions" :hold="connectionHold"
+            :show-hold="app === 'emulator' && terminal === '5250'" @options="keepAliveOptions = $event" @hold="connectionHold = $event" />
           <div v-if="app === 'emulator'" class="row">
             <label for="sf-terminal">種類</label>
             <select id="sf-terminal" v-model="terminal">

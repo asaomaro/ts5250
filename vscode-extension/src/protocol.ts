@@ -70,6 +70,8 @@ export interface EmbedConnectionOptions {
   associatedPrinter?: string;
   deviceNameRetry?: boolean;
   keepAlive?: boolean;
+  keepAliveOptions?: { initialDelayMs?: number | undefined; intervalMs?: number | undefined; count?: number | undefined };
+  connectionHold?: number | "never";
   ifsPath?: string;
   /** 開いたときに入力する SQL。自動実行はしない */
   sqlInitial?: string;
@@ -77,7 +79,7 @@ export interface EmbedConnectionOptions {
 
 const EMBED_CONNECTION_FIELDS: Record<keyof EmbedConnectionOptions, true> = {
   enhanced: true, allowPcCommand: true, pcCommand: true, printer: true, associatedPrinter: true,
-  deviceNameRetry: true, keepAlive: true, ifsPath: true, sqlInitial: true
+  deviceNameRetry: true, keepAlive: true, keepAliveOptions: true, connectionHold: true, ifsPath: true, sqlInitial: true
 };
 export const EMBED_CONNECTION_KEYS = Object.keys(EMBED_CONNECTION_FIELDS) as (keyof EmbedConnectionOptions)[];
 
@@ -92,6 +94,17 @@ export function embedConnectionError(value: unknown): string | undefined {
     if (v[key] !== undefined && typeof v[key] !== "string") return `${key} は文字列で指定してください`;
   }
   if (typeof v.ifsPath === "string" && v.ifsPath !== "" && !v.ifsPath.startsWith("/")) return "IFS の初期フォルダーは / から始まるパスで指定してください";
+  if (v.connectionHold !== undefined && v.connectionHold !== "never" && (typeof v.connectionHold !== "number" || !Number.isInteger(v.connectionHold) || v.connectionHold < 0 || v.connectionHold > 1440)) return "接続保持時間は 0〜1440 の整数（分）または無期限で指定してください";
+  if (v.keepAliveOptions !== undefined) {
+    if (!v.keepAliveOptions || typeof v.keepAliveOptions !== "object" || Array.isArray(v.keepAliveOptions)) return "TCP キープアライブの詳細設定はオブジェクトで指定してください";
+    const options = v.keepAliveOptions as Record<string, unknown>;
+    if (Object.keys(options).some((k) => !["initialDelayMs", "intervalMs", "count"].includes(k))) return "TCP キープアライブに未対応の項目があります";
+    for (const key of ["initialDelayMs", "intervalMs", "count"] as const) {
+      const n = options[key];
+      if (n === undefined) continue;
+      if (typeof n !== "number" || !Number.isInteger(n) || (key === "count" ? n < 1 || n > 127 : n < 1000 || n > 32767000 || n % 1000 !== 0)) return "TCP キープアライブの時間は 1〜32767 の整数（秒）、回数は 1〜127 で指定してください";
+    }
+  }
   const pc = v.pcCommand;
   if (pc !== undefined) {
     if (!pc || typeof pc !== "object" || Array.isArray(pc)) return "PC コマンドの詳細設定はオブジェクトで指定してください";

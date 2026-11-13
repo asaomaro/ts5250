@@ -1,3 +1,4 @@
+import type { TcpKeepAliveOptions } from "@ts5250/base";
 import { randomUUID } from "node:crypto";
 import { hostname, userInfo } from "node:os";
 import {
@@ -75,9 +76,10 @@ export interface OpenOptions extends ConnectOptions {
   deviceNameRetry?: boolean;
   /**
    * **TCP キープアライブを入れるか**（表示セッション。既定 false＝ACS と同じ）。一時的な回線断（LAN ケーブルの抜き差し）で接続が落ちるのを避ける
-   * （`tn5250` の `Session5250` の `keepAlive`）。途中の機器が無通信の接続を落とす環境だけ true。プリンターには効かない（常に入れる）
+   * （`tn5250` の `Session5250` の `keepAlive`）。途中の機器が無通信の接続を落とす環境だけ true。プリンターには OpenPrinterOptions の設定を使う
    */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
   /**
    * 書き出しできないスプールを取得したあと、ホスト側のスプールをどうするか。
    * **既定は保留**——削除は取り消せないので、利用者が明示的に選んだときだけ行う。
@@ -94,6 +96,7 @@ export interface OpenOptions extends ConnectOptions {
    * 未指定ならマネージャの既定（`SessionManagerOptions.idleTimeoutMs`）に従う。
    */
   idleTimeoutMs?: IdleLimit;
+  connectionHoldMs?: GraceLimit;
 }
 
 // **アイドル上限の型は `session-lifetime.ts` が持つ**（寿命の規則と同じ場所に置く。
@@ -371,6 +374,7 @@ export interface SessionEntry {
   jobResolved?: Promise<SessionJob | undefined>;
   /** このセッションのアイドルタイムアウト（`OpenOptions` 由来）。無ければマネージャ既定 */
   idleTimeoutMs?: IdleLimit;
+  connectionHoldMs?: GraceLimit;
   /**
    * **このセッションの持ち主の状態**（`20260908-session-survives-disconnect` の D7 / D10）。
    * 「いま誰が持っているか」は `claim` が発行する単調増加の番号（`holder.token`）で表す。
@@ -457,6 +461,7 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
    * **TCP キープアライブを入れるか**（既定 false＝ACS と同じ。`PrinterSession` の `keepAlive`）。常駐プリンターが途中の機器に無通信の接続を落とされる環境だけ true
    */
   keepAlive?: boolean;
+  keepAliveOptions?: TcpKeepAliveOptions;
   /**
    * 書き出しできないスプールを取得したあと、ホスト側のスプールをどうするか。
    * **既定は保留**——削除は取り消せないので、利用者が明示的に選んだときだけ行う。
@@ -742,6 +747,8 @@ export interface SessionManagerOptions {
    * この値は **WebSocket が閉じたとき**（タブを閉じた・回線の瞬断）の猶予。心拍が途絶えたときは `stalledGraceMs`。
    */
   reconnectGraceMs?: GraceLimit;
+  /** 統一保持時間。指定時は旧 reconnect/stalled の両方より優先する */
+  connectionHoldMs?: GraceLimit;
   /**
    * **心拍が途絶えて切れたとき**の猶予（ms、または `"never"`）。既定 `DEFAULT_STALLED_GRACE_MS`（`"never"`）。`reconnectGraceMs` より短くはならない
    * （`max` を取る）。`reconnectGraceMs` が 0 以下（猶予なし）ならこちらも効かない。
@@ -844,6 +851,7 @@ export class SessionManager {
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   /** 保持者トークンの発番。**単調増加**なので、後から取った者が常に新しい */
   private holderSeq = 0;
+  private readonly connectionHoldMs: number | undefined;
   private readonly reconnectGraceMs: number;
   private readonly stalledGraceMs: number;
 
@@ -851,6 +859,7 @@ export class SessionManager {
     this.maxSessions = opts.maxSessions ?? 8;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? "never";
     this.maxResidentPrinters = opts.maxResidentPrinters ?? DEFAULT_MAX_RESIDENT_PRINTERS;
+    this.connectionHoldMs = opts.connectionHoldMs === undefined ? undefined : graceToMs(opts.connectionHoldMs);
     this.reconnectGraceMs = graceToMs(opts.reconnectGraceMs ?? DEFAULT_RECONNECT_GRACE_MS);
     this.stalledGraceMs = graceToMs(opts.stalledGraceMs ?? DEFAULT_STALLED_GRACE_MS);
     this.rescueIntervalMs = opts.rescueIntervalMs ?? 10_000;
@@ -935,7 +944,8 @@ export class SessionManager {
       pcCommandEnabled: opts.pcCommand?.enabled === true,
       pcCommands: [],
       ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
-      ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {})
+      ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {}),
+      ...(opts.connectionHoldMs !== undefined ? { connectionHoldMs: opts.connectionHoldMs } : {})
     };
     // 起動応答レコードから分かる範囲（装置名＝ジョブ名・システム名）を先に載せる。
     // **追加の往復はゼロ**で、資格情報が無い環境でもここまでは必ず出せる
@@ -1759,7 +1769,7 @@ export class SessionManager {
    *   呼び出し側で閉じる判断に使うなら `isHeld` と併せて見る。
    */
   holdForReconnect(id: string, stalled = false): boolean {
-    const graceMs = this.graceFor(stalled);
+    const graceMs = this.graceFor(stalled, id);
     if (graceMs <= 0) return false;
     const entry = this.sessions.get(id);
     if (!entry || entry.hold.holding) return false;
@@ -1783,7 +1793,11 @@ export class SessionManager {
    * 猶予の長さ（ms）。**閉じたとき**は `reconnectGraceMs`、**心拍が途絶えたとき**（`stalled`）は `stalledGraceMs`（ただし前者より短くならない）。
    * `reconnectGraceMs` が 0 以下なら、どちらも 0（猶予なしの逃げ道を、心拍の側だけ生かさない）
    */
-  private graceFor(stalled: boolean): number {
+  private graceFor(stalled: boolean, id: string): number {
+    // 保存した個別値 > 統一したサーバー設定 > 旧 CLI の互換設定。
+    const configured = this.sessions.get(id)?.connectionHoldMs;
+    if (configured !== undefined) return graceToMs(configured);
+    if (this.connectionHoldMs !== undefined) return this.connectionHoldMs;
     if (this.reconnectGraceMs <= 0) return 0;
     return stalled ? Math.max(this.stalledGraceMs, this.reconnectGraceMs) : this.reconnectGraceMs;
   }
@@ -1867,7 +1881,7 @@ export class SessionManager {
       hasHolder: this.hasHolder(id),
       hasOtherViewer: this.hasViewer(id),
       resident: this.isResident(id),
-      holdable: this.reconnectGraceMs > 0 && display !== undefined,
+      holdable: display !== undefined && this.graceFor(ctx.stalled === true, id) > 0,
       hold: display?.hold ?? endHold(),
       now: this.now()
     });

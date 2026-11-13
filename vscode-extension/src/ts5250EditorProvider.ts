@@ -252,8 +252,8 @@ async function resolvePayload(
     deps.log(`system同期に失敗しました（${file.app}）: ${e instanceof Error ? e.message : String(e)}`);
   }
   const is5250 = file.app === "emulator" && file.terminal !== "3270";
-  const transportSettings = file.keepAlive !== undefined || file.deviceNameRetry !== undefined;
-  const displaySettings = is5250 && [file.allowPcCommand, file.pcCommand, file.associatedPrinter, file.enhanced].some((v) => v !== undefined);
+  const transportSettings = file.keepAlive !== undefined || file.keepAliveOptions !== undefined || file.deviceNameRetry !== undefined;
+  const displaySettings = is5250 && [file.allowPcCommand, file.pcCommand, file.associatedPrinter, file.enhanced, file.connectionHold].some((v) => v !== undefined);
   if ((isSessionApp(file.app) && transportSettings) || displaySettings || (file.app === "printer" && file.printer !== undefined)) {
     if (!deps.syncSession) throw new Error("接続の詳細設定に対応していません");
     const session: SessionSyncInput = { ...input, app: file.app as "emulator" | "printer" };

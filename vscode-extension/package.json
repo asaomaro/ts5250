@@ -15,20 +15,34 @@
   "engines": {
     "vscode": "^1.90.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "main": "./dist/extension.js",
-  "activationEvents": ["onCustomEditor:ts5250.editor"],
+  "activationEvents": [
+    "onCustomEditor:ts5250.editor"
+  ],
   "contributes": {
     "customEditors": [
       {
         "viewType": "ts5250.editor",
         "displayName": "ts5250",
         "selector": [
-          { "filenamePattern": "*.ts5250emu" },
-          { "filenamePattern": "*.ts5250prt" },
-          { "filenamePattern": "*.ts5250spl" },
-          { "filenamePattern": "*.ts5250sql" },
-          { "filenamePattern": "*.ts5250ifs" }
+          {
+            "filenamePattern": "*.ts5250emu"
+          },
+          {
+            "filenamePattern": "*.ts5250prt"
+          },
+          {
+            "filenamePattern": "*.ts5250spl"
+          },
+          {
+            "filenamePattern": "*.ts5250sql"
+          },
+          {
+            "filenamePattern": "*.ts5250ifs"
+          }
         ],
         "priority": "default"
       }
@@ -36,13 +50,30 @@
     "languages": [
       {
         "id": "ts5250",
-        "extensions": [".ts5250emu", ".ts5250prt", ".ts5250spl", ".ts5250sql", ".ts5250ifs"],
+        "extensions": [
+          ".ts5250emu",
+          ".ts5250prt",
+          ".ts5250spl",
+          ".ts5250sql",
+          ".ts5250ifs"
+        ],
         "icon": {
           "light": "./icon.png",
           "dark": "./icon.png"
         }
       }
-    ]
+    ],
+    "configuration": {
+      "title": "ts5250",
+      "properties": {
+        "ts5250.nodePath": {
+          "type": "string",
+          "default": "node",
+          "scope": "machine",
+          "description": "サーバーを実行する Node.js 26.4 以降の実行ファイル。PATH で見つからない場合は絶対パスを指定します"
+        }
+      }
+    }
   },
   "scripts": {
     "build": "tsc -b",
@@ -50,7 +81,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
-    "@types/node": "^20.19.0",
+    "@types/node": "^26.6.6",
     "@types/vscode": "^1.90.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

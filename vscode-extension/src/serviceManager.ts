@@ -11,8 +11,8 @@ import { dirname } from "node:path";
  *
  * `packages/server`の`main()`はSIGINT/SIGTERMで`process.exit(0)`する
  * （research F3）ため、**必ず別プロセスとしてspawnする**（design.md「設計方針1」）。
- * システムに`node`が無い利用者環境でも動くよう、`ELECTRON_RUN_AS_NODE=1`を立てて
- * `process.execPath`（VSCodeが内蔵するElectronのNode）を使う（research F2）。
+ * TCP keepalive の間隔・回数を指定するため、サーバーは外部 Node.js 26.4+ で起動する。
+ * 拡張ホスト内蔵 Node のバージョンとは独立させる。
  */
 
 /** ロックファイルの内容（`context.globalStorageUri/service.json`） */
@@ -46,6 +46,8 @@ export interface ServiceManagerOptions {
   connectionsPath: string;
   /** PC コマンド等の信頼設定。拡張専用のサーバー設定ファイル */
   profilesPath?: string;
+  /** 外部 Node.js 26.4+。VSCode 内蔵 Node は対応版とは限らない */
+  nodePath?: string;
   /** `--secret-key-file`に渡す値（`context.globalStorageUri/.env`） */
   secretKeyFilePath: string;
   /** このVSCodeウィンドウを識別する値（`extension.ts`が`activate`時に`crypto.randomUUID()`で生成） */
@@ -298,8 +300,8 @@ function defaultSpawnServer(opts: ServiceManagerOptions, port: number): ChildPro
     }
     args.push("--profiles", opts.profilesPath);
   }
-  return spawn(process.execPath, args, {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  return spawn(opts.nodePath ?? "node", args, {
+    env: { ...process.env },
     stdio: ["ignore", "pipe", "pipe"]
   });
 }
