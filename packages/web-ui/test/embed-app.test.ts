@@ -613,3 +613,44 @@ describe("EmbedApp: プリンターセッション", () => {
     expect(w.find(".connect-btn").text()).toBe("接続");
   });
 });
+
+
+describe("PC コマンド許可付きの接続", () => {
+  it("許可設定はフォームへ戻し、接続時は登録済みのセッション参照だけを使う", async () => {
+    embedStore.loaded = { app: "emulator", host: "AS400", allowPcCommand: true };
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    expect(w.findComponent(SettingsForm).props("initial")?.allowPcCommand).toBe(true);
+    embedStore.connect = { app: "emulator", host: "AS400", allowPcCommand: true, sessionRef: "srv:test" };
+    await nextTick();
+    await nextTick();
+    const open = openSession.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(open).toMatchObject({ type: "open", session: "srv:test" });
+    expect(open).not.toHaveProperty("allowPcCommand");
+    expect(open).not.toHaveProperty("pcCommand");
+    w.unmount();
+  });
+});
+
+
+describe("詳細設定のペインへの引き渡し", () => {
+  it("プリンターの保存済み参照を kind=printer で開き、信頼設定を WS に載せない", async () => {
+    const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "printer", host: "AS400", sessionRef: "srv:printer", printer: { autoPdfDir: "/tmp/pdf", autoPrint: "PRT_TEST" } };
+    await nextTick(); await nextTick();
+    expect(openPrinterSession.mock.calls[0]?.[0]).toMatchObject({ type: "open", kind: "printer", session: "srv:printer" });
+    expect(openPrinterSession.mock.calls[0]?.[0]).not.toHaveProperty("printer");
+    w.unmount();
+  });
+  it("IFS・SQL の初期値を該当ペインへ渡す", async () => {
+    const ifs = mount(EmbedApp, { props: { app: "ifs" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "ifs", host: "AS400", systemRef: "own:test", ifsPath: "/home/USER" };
+    await nextTick();
+    expect(ifs.findComponent(IfsPane).props("initialPath")).toBe("/home/USER");
+    ifs.unmount();
+    const sql = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "sql", host: "AS400", systemRef: "own:test", sqlInitial: "SELECT 1" };
+    await nextTick();
+    expect(sql.findComponent(SqlPane).props("initialSql")).toBe("SELECT 1");
+    sql.unmount();
+  });
+});

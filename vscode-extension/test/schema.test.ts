@@ -53,3 +53,39 @@ describe("stringifyTs5250File", () => {
     expect(parsed).toEqual({ ok: true, file: original });
   });
 });
+
+
+describe("PC コマンドの許可は boolean のみ", () => {
+  it.each([true, false])("%s を読み書きできる", (allowPcCommand) => {
+    expect(parseTs5250File(stringifyTs5250File({ app: "emulator", allowPcCommand }), "emulator"))
+      .toEqual({ ok: true, file: { app: "emulator", allowPcCommand } });
+  });
+  it.each([null, "true", 1, [], {}])("%j を拒否する", (allowPcCommand) => {
+    expect(parseTs5250File(JSON.stringify({ allowPcCommand }), "emulator").ok).toBe(false);
+  });
+});
+
+
+describe("詳細設定の入力形状", () => {
+  it("全項目をファイルへ保存・復元できる", () => {
+    const file = { app: "emulator" as const, host: "AS400", enhanced: true, deviceNameRetry: true, keepAlive: true, associatedPrinter: "PRT_TEST", allowPcCommand: true, pcCommand: { allow: ["prog:notepad", "echo .*"], timeoutMs: 1500 }, printer: { autoPdfDir: "/tmp/pdf", autoPrint: "PRT_TEST" }, ifsPath: "/home/USER", sqlInitial: "SELECT 1" };
+    expect(parseTs5250File(stringifyTs5250File(file), "emulator")).toEqual({ ok: true, file });
+  });
+  it.each([
+    { pcCommand: null }, { pcCommand: [] }, { pcCommand: "true" },
+    { pcCommand: { enabled: true } }, { pcCommand: { allow: [] } },
+    { pcCommand: { allow: "echo" } }, { pcCommand: { allow: [null] } },
+    { pcCommand: { allow: [{}] } }, { pcCommand: { allow: [42] } },
+    { pcCommand: { allow: [""] } }, { pcCommand: { allow: ["["] } },
+    { pcCommand: { allow: ["prog:"] } }, { pcCommand: { timeoutMs: 0 } },
+    { pcCommand: { timeoutMs: 3_600_001 } }, { pcCommand: { timeoutMs: 1.5 } },
+    { pcCommand: { timeoutMs: "60000" } },
+    { printer: null }, { printer: [] }, { printer: "PRT_TEST" },
+    { printer: { autoPdfDir: [] } }, { printer: { autoPrint: {} } },
+    { printer: { command: "echo" } }, { ifsPath: "relative" },
+    { ifsPath: null }, { sqlInitial: [] }, { enhanced: "false" },
+    { deviceNameRetry: null }, { keepAlive: [] }, { associatedPrinter: 123 }
+  ])("不正な形 %j を拒否する", (values) => {
+    expect(parseTs5250File(JSON.stringify({ host: "AS400", ...values }), "emulator").ok).toBe(false);
+  });
+});

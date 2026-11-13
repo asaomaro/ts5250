@@ -94,6 +94,7 @@ interface Entry {
   system: string | undefined;
   /** そのシステムが設定から消えている（銘板を出して操作させない） */
   gone: boolean;
+  initial: { initialPath?: string; initialSql?: string };
 }
 
 /**
@@ -114,12 +115,16 @@ const entries = computed<Entry[]>(() => {
     const g = workspaceStore.groupOf(tab);
     if (!g) continue; // 閉じた（どのグループにも居ない）
     const system = workspaceStore.systemOf(tab);
+    const config = systemsStore.systems.find((s) => s.ref === system);
     out.push({
       tab,
       comp,
       el: paneSlotEls.get(tab),
       active: !props.launcher && g.activeTab === tab,
       system,
+      // 初期値は対象システムから配る。ペイン自身に設定ストアを引かせない。
+      initial: tab.startsWith("ifs:") ? { initialPath: config?.ifsPath || "/" }
+        : tab.startsWith("sql:") ? { initialSql: config?.sqlInitial ?? "" } : {},
       // **消えたシステムのタブは黙って別システムへ飛ばさず、止めて理由を出す。**
       // 閉じてしまうと書きかけの内容ごと消えるので、残して操作だけ塞ぐ
       gone: system !== undefined && !systemsStore.systems.some((s) => s.ref === system)
@@ -142,7 +147,7 @@ const entries = computed<Entry[]>(() => {
         文言が 6 か所へ散る。ペイン側は「`system` が無ければ操作させない」だけを守ればよい。
       -->
       <p v-if="e.gone" class="sys-gone" role="alert">{{ MSG_SYSTEM_GONE }}</p>
-      <component :is="e.comp" :tab-id="e.tab" :active="e.active" :system="e.gone ? undefined : e.system" />
+      <component :is="e.comp" v-bind="e.initial" :tab-id="e.tab" :active="e.active" :system="e.gone ? undefined : e.system" />
     </Teleport>
   </div>
 </template>

@@ -89,7 +89,9 @@ const sysForm = reactive<SysFormState>({
   tls: true,
   ccsid: DEFAULT_CCSID,
   katakanaVariant: undefined,
-  spoolCcsid: DEFAULT_SPOOL_CCSID
+  spoolCcsid: DEFAULT_SPOOL_CCSID,
+  ifsPath: "",
+  sqlInitial: ""
 });
 const sesForm = reactive<SesFormState>({
   name: "",
@@ -101,6 +103,9 @@ const sesForm = reactive<SesFormState>({
   screenSize: DEFAULT_SCREEN_SIZE,
   katakanaVariant: undefined,
   deviceName: "",
+  deviceNameRetry: false,
+  keepAlive: false,
+  enhanced: false,
   associatedPrinter: "",
   associatedPrinterSession: "",
   associatedPrinterTimeout: 5,
@@ -344,6 +349,8 @@ function loadSystem(): void {
   sysForm.ccsid = s.ccsid ?? DEFAULT_CCSID;
   sysForm.katakanaVariant = s.katakanaVariant;
   sysForm.spoolCcsid = s.spoolCcsid ?? DEFAULT_SPOOL_CCSID;
+  sysForm.ifsPath = s.ifsPath ?? "";
+  sysForm.sqlInitial = s.sqlInitial ?? "";
   sysForm.color = s.color; // 未設定のまま＝自動（ref から割り当てる）
   sysForm.autoSignon = s.autoSignon;
   sysForm.signonUser = s.signonUser ?? "";
@@ -369,6 +376,8 @@ function loadSession(): void {
   sesForm.model3270 = s.model3270 ?? 2;
   sesForm.vtEncoding = s.vtEncoding ?? "utf-8";
   sesForm.deviceName = s.deviceName ?? "";
+  sesForm.deviceNameRetry = s.deviceNameRetry ?? false;
+  sesForm.keepAlive = s.keepAlive ?? false;
   sesForm.associatedPrinter = s.associatedPrinter ?? "";
   sesForm.associatedPrinterSession = s.associatedPrinterSession ?? "";
   sesForm.associatedPrinterTimeout = s.associatedPrinterTimeout ?? 5;
@@ -378,7 +387,7 @@ function loadSession(): void {
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
   sesForm.ccsid = s.ccsid;
   sesForm.katakanaVariant = s.katakanaVariant;
-  sesForm.enhanced = s.enhanced;
+  sesForm.enhanced = s.enhanced ?? false;
   // **「サーバー既定に従う」は選べなくした**（`20260802-config-form-polish`）。
   // 未設定の定義（手書きの profiles.json など）は「切らない」として開く
   // ——出荷時のサーバー既定が「切らない」なので、開いた時点の意味は変わらない
@@ -502,6 +511,7 @@ function validate(): string | undefined {
     if (sysForm.port !== undefined && (sysForm.port < 1 || sysForm.port > 65535)) {
       return "ポートは 1〜65535 の範囲で指定してください";
     }
+    if (sysForm.ifsPath?.trim() && !sysForm.ifsPath.trim().startsWith("/")) return "IFS の初期フォルダーは / から始まるパスで指定してください";
     if (sysForm.autoSignon && !sysForm.signonUser?.trim()) {
       return "自動サインオンにはユーザー名が必要です";
     }
@@ -524,6 +534,9 @@ async function save(): Promise<void> {
   try {
     if (props.kind === "system") {
       const form = { ...sysForm, name: sysForm.name!.trim(), host: sysForm.host!.trim() } as SystemForm;
+      if (form.ifsPath?.trim()) form.ifsPath = form.ifsPath.trim();
+      else delete form.ifsPath;
+      if (!form.sqlInitial?.trim()) delete form.sqlInitial;
       if (!form.autoSignon) {
         // 明示オフ。サーバーは autoSignon:false を「解除」として扱う
         form.autoSignon = false;
@@ -541,6 +554,7 @@ async function save(): Promise<void> {
       }
     } else {
       const form = { ...sesForm, name: sesForm.name!.trim() } as SessionConfigForm;
+      if (sesForm.sessionType !== "printer" && !(sesForm.sessionType === "display" && sesForm.terminal === "5250")) delete form.deviceNameRetry;
       // transformTo は printer 専用。空文字だとサーバーの min(1) で 400 になるので、
       // sessionType によらず「空なら送らない」を常に通す（display の既定 "" 対策）
       const tt = (sesForm.transformTo ?? "").trim();
@@ -951,6 +965,15 @@ const infoRows = computed(() => {
           </select>
           <span class="hint">スプールの SCS 用。上の 5250 画面用とは別</span>
         </label>
+        <label class="row">
+          <span class="cap">IFS 初期フォルダー</span>
+          <input v-model="sysForm.ifsPath" data-setting="ifsPath" placeholder="/（既定）" />
+        </label>
+        <label class="row top">
+          <span class="cap">SQL 初期文</span>
+          <textarea v-model="sysForm.sqlInitial" data-setting="sqlInitial" rows="3" placeholder="開いたときに入力欄へセット（自動実行しません）" />
+        </label>
+        <p class="hint">初期値は IFS・SQL のタブを閉じて開き直したときに適用します</p>
         <!--
           **システムカラー**（`20260802-tabs-own-system`）。異なるシステムのタブを
           並べたときの見分けに使う。持つのは**パレットの番号**だけで、色の実体は
@@ -1050,6 +1073,18 @@ const infoRows = computed(() => {
           </select>
         </label>
         <label class="row"><span class="cap">装置名</span><input v-model="sesForm.deviceName" /></label>
+        <label v-if="sesForm.sessionType === 'printer' || (sesForm.sessionType === 'display' && sesForm.terminal === '5250')" class="row">
+          <span class="cap">装置名競合回避</span>
+          <span class="tv"><input v-model="sesForm.deviceNameRetry" data-setting="deviceNameRetry" type="checkbox" /> 使用中なら番号を繰り上げて再試行</span>
+        </label>
+        <label class="row">
+          <span class="cap">キープアライブ</span>
+          <span class="tv"><input v-model="sesForm.keepAlive" data-setting="keepAlive" type="checkbox" /> TCP キープアライブを使う（既定は無効）</span>
+        </label>
+        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === '5250'" class="row">
+          <span class="cap">拡張5250 GUI</span>
+          <span class="tv"><input v-model="sesForm.enhanced" data-setting="enhanced" type="checkbox" /> ウィンドウ・選択フィールド等を申告する</span>
+        </label>
         <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === '5250'" class="row">
           <span class="cap" title="ホストに申告すると、対話ジョブの印刷装置がこのプリンター装置になります（ACS のプリンターの関連付けと同じ）">
             関連付けプリンター
@@ -1224,7 +1259,7 @@ const infoRows = computed(() => {
           <template v-if="wmForm.text.trim()">
             <label class="row">
               <span class="cap">表示</span>
-              <input v-model="wmForm.enabled" type="checkbox" />
+              <input v-model="wmForm.enabled" data-setting="watermarkEnabled" type="checkbox" />
               <span class="hint">文字を残したまま切れます</span>
             </label>
             <label class="row">
@@ -1577,7 +1612,8 @@ const infoRows = computed(() => {
 .row input:not([type]),
 .row input[type="number"],
 .row input[type="password"],
-.row select {
+.row select,
+.row textarea {
   border: 1px solid var(--line);
   border-radius: 5px;
   padding: 3px 8px;
@@ -1587,6 +1623,13 @@ const infoRows = computed(() => {
   font-size: 0.76rem;
   width: 100%;
   box-sizing: border-box;
+}
+.row.top {
+  align-items: start;
+}
+.row textarea {
+  resize: vertical;
+  min-width: 0;
 }
 .row input[type="checkbox"] {
   justify-self: start;

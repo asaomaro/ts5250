@@ -196,6 +196,8 @@ export abstract class ConfigStore {
     if (s.ccsid !== undefined) pub.ccsid = s.ccsid;
     if (s.katakanaVariant !== undefined) pub.katakanaVariant = s.katakanaVariant;
     if (s.spoolCcsid !== undefined) pub.spoolCcsid = s.spoolCcsid;
+    if (s.ifsPath !== undefined) pub.ifsPath = s.ifsPath;
+    if (s.sqlInitial !== undefined) pub.sqlInitial = s.sqlInitial;
     // **色は資格情報ではない。** 見分けの手段なので、そのシステムが見える人には見せる
     if (s.color !== undefined) pub.color = s.color;
     if (s.owner !== undefined) pub.owner = s.owner;
@@ -216,6 +218,8 @@ export abstract class ConfigStore {
     if (s.model3270 !== undefined) pub.model3270 = s.model3270;
     if (s.vtEncoding !== undefined) pub.vtEncoding = s.vtEncoding;
     if (s.deviceName !== undefined) pub.deviceName = s.deviceName;
+    if (s.deviceNameRetry !== undefined) pub.deviceNameRetry = s.deviceNameRetry;
+    if (s.keepAlive !== undefined) pub.keepAlive = s.keepAlive;
     if (s.associatedPrinter !== undefined) pub.associatedPrinter = s.associatedPrinter;
     // 関連付けるプリンターセッションは**参照**で返す（`system` と同じく、利用者が選び直せる形）
     if (s.associatedPrinterSession !== undefined) pub.associatedPrinterSession = makeRef(this.source, s.associatedPrinterSession);

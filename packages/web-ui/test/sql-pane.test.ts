@@ -593,3 +593,16 @@ describe("結果の最大化", () => {
     w.unmount();
   });
 });
+
+
+describe("拡張版の初期SQL", () => {
+  it("保存した文を入力欄へセットするが自動実行しない", async () => {
+    const initialSql = "DELETE FROM TESTLIB.TESTFILE";
+    const w = mount(SqlPane, { props: { tabId: "sql:initial", system: SYSTEM.ref, initialSql } });
+    await flushPromises();
+    expect(w.find<HTMLTextAreaElement>("textarea").element.value).toBe(initialSql);
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.some((c) => String((c[1] as RequestInit | undefined)?.body).includes(initialSql))).toBe(false);
+    w.unmount();
+  });
+});

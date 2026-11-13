@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import { EMBED_APP_KINDS, type ConnectPayload, type EmbedAppKind, type HostToWebviewMessage, type WebviewToHostMessage } from "../embed-protocol.js";
+import { EMBED_APP_KINDS, embedConnectionError, type ConnectPayload, type EmbedAppKind, type HostToWebviewMessage, type WebviewToHostMessage } from "../embed-protocol.js";
 
 /**
  * `embed.html` と、それを iframe 表示する VSCode 拡張機能（`vscode-extension/`）との
@@ -67,13 +67,13 @@ export function appKindFromQuery(search: string): EmbedAppKind {
 /**
  * `payload`の形を検査する（`type`が合っているだけでは中身の型は保証されない。
  * `.aidev/conventions/test-input-shape.md`——外から来る入力は値だけでなく形も見る）。
- * 必須項目（`app`が既知の種別・`host`が文字列）だけを見る。その他の項目は`ConnectPayload`側で
- * 任意（`?:`）なので、無くても・型が違っても実害が小さく、ここでは検査しない
+ * 必須項目（`app`が既知の種別・`host`が文字列）と詳細設定を検証する。
+ * 配列・オブジェクトの形を確かめずにフォームへ渡すと、復元時の join 等で画面が壊れるため。
  */
 function isConnectPayload(v: unknown): v is ConnectPayload {
   if (!v || typeof v !== "object") return false;
   const p = v as Record<string, unknown>;
-  return typeof p.host === "string" && typeof p.app === "string" && APP_KINDS.includes(p.app);
+  return typeof p.host === "string" && typeof p.app === "string" && APP_KINDS.includes(p.app) && embedConnectionError(p) === undefined;
 }
 
 /** メッセージ受信を配線する。`embed.ts` から一度だけ呼ぶ */

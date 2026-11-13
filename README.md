@@ -665,8 +665,12 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 
 | 階層 | 持つもの |
 |---|---|
-| **システム** | `host` / `port` / `tls` / `ccsid`（既定）/ `signon`（資格情報） |
-| **セッション設定** | `system`（親システムの参照）/ `sessionType`（`display` / `printer` / `dtaqwatch` / `msgwatch`）/ `terminal`（`5250` / `3270` / `vt`）/ `deviceName` / `deviceNameRetry` / `associatedPrinter` / `associatedPrinterSession` / `associatedPrinterTimeout` / `closeAssociatedPrinterWithLastSession` / `screenSize` / `model3270` / `vtEncoding` / `ccsid`（上書き）/ `enhanced` / `watermark` / `autoStart` / `idleTimeout` / `rescueAction` / `transformTo` / `dtaqWatch` / `msgWatch` / `printer`・`pcCommand`・`webhook`（サーバー設定のみ） |
+| **システム** | `host` / `port` / `tls` / `ccsid`（既定）/ `signon`（資格情報）/ `ifsPath`（IFS 初期フォルダー）/ `sqlInitial`（SQL 初期テキスト） |
+| **セッション設定** | `system`（親システムの参照）/ `sessionType`（`display` / `printer` / `dtaqwatch` / `msgwatch`）/ `terminal`（`5250` / `3270` / `vt`）/ `deviceName` / `deviceNameRetry` / `keepAlive` / `associatedPrinter` / `associatedPrinterSession` / `associatedPrinterTimeout` / `closeAssociatedPrinterWithLastSession` / `screenSize` / `model3270` / `vtEncoding` / `ccsid`（上書き）/ `enhanced` / `watermark` / `autoStart` / `idleTimeout` / `rescueAction` / `transformTo` / `dtaqWatch` / `msgWatch` / `printer`・`pcCommand`・`webhook`（サーバー設定のみ） |
+
+接続画面のシステム編集から IFS 初期フォルダーと SQL 初期テキストを設定できます。
+変更はタブを開き直したときに反映され、SQL は自動実行しません。
+セッション編集では拡張 5250 GUI・装置名競合回避・TCP キープアライブも設定できます。
 
 参照は**接頭辞つきのトークン**で、保管場所まで含めて一意に決まります。
 

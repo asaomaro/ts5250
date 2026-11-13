@@ -31,7 +31,7 @@ import { makePaneTabId } from "./paneLabels.js";
 import { sessionsStore, type SessionMeta } from "./stores/sessions.js";
 import { featureOf } from "./features.js";
 import { REPORT_VIEW_KEYS, type ViewKey } from "./stores/viewSettings.js";
-import { EMBED_APP_EXTENSIONS, type EmbedAppKind, type SettingsFormValues } from "./embed-protocol.js";
+import { EMBED_APP_EXTENSIONS, EMBED_CONNECTION_KEYS, type EmbedAppKind, type SettingsFormValues } from "./embed-protocol.js";
 import { downloadScreenHtml } from "./screenExport.js";
 import { settingsColumnsOf } from "./settingsLayout.js";
 
@@ -67,7 +67,7 @@ const APP_FEATURES: Record<Exclude<EmbedAppKind, "emulator" | "printer">, string
 const restTarget = computed(() => {
   const ref = embedStore.connect?.systemRef;
   if (!ref || props.app === "emulator" || props.app === "printer") return undefined;
-  return { tabId: makePaneTabId(APP_FEATURES[props.app], ref), system: ref };
+  return { tabId: makePaneTabId(APP_FEATURES[props.app], ref), system: ref, ifsPath: embedStore.connect?.ifsPath || "/", sqlInitial: embedStore.connect?.sqlInitial ?? "" };
 });
 
 /**
@@ -102,9 +102,11 @@ watch(
     connectError.value = undefined;
     try {
       const printer = props.app === "printer";
-      // プリンターは`kind:"printer"`で開く。サーバーの直接接続の経路は出力設定（自動PDF・自動印刷）を
-      // 受け付けない（信頼設定。`ws-handler.ts`の`onOpenPrinter`）——.ts5250からは帳票を受けて見るだけ
-      const open: WsOpen = { type: "open", host: payload.host, ...(printer ? { kind: "printer" as const } : {}) };
+      // PC コマンド・印刷の信頼設定と詳細接続設定は、拡張ホストがサーバー設定へ同期済み。
+      // 直接接続の WS 入力には信頼設定を載せない。プリンターは保存済み参照でも kind が必要。
+      const open: WsOpen = payload.sessionRef
+        ? { type: "open", session: payload.sessionRef, ...(printer ? { kind: "printer" as const } : {}) }
+        : { type: "open", host: payload.host, ...(printer ? { kind: "printer" as const } : {}) };
       if (payload.port !== undefined) open.port = payload.port;
       if (payload.tls !== undefined) open.tls = payload.tls;
       if (payload.ccsid !== undefined) open.ccsid = payload.ccsid;
@@ -283,6 +285,7 @@ const settingsInitial = computed<SettingsFormValues>(() => {
   if (c?.terminal !== undefined) v.terminal = c.terminal;
   if (c?.screenSize !== undefined) v.screenSize = c.screenSize;
   if (c?.watermark !== undefined) v.watermark = c.watermark;
+  if (c) for (const key of EMBED_CONNECTION_KEYS) if (c[key] !== undefined) Object.assign(v, { [key]: c[key] });
   if (c?.deviceName !== undefined) v.deviceName = c.deviceName;
   if (c?.user !== undefined) v.user = c.user;
   return v;
@@ -337,8 +340,8 @@ function saveScreenHtml(): void {
       <PrinterPane v-else-if="app === 'printer' && sessionId" :session-id="sessionId" :focused="true" />
       <template v-else-if="!isSession && restTarget">
         <SpoolPane v-if="app === 'spool'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
-        <SqlPane v-else-if="app === 'sql'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
-        <IfsPane v-else :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
+        <SqlPane v-else-if="app === 'sql'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" :initial-sql="restTarget.sqlInitial" />
+        <IfsPane v-else :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" :initial-path="restTarget.ifsPath" />
       </template>
       <p v-else-if="connecting" class="status">接続中…</p>
       <!-- 待機表示: 何の機能か・どこへ繋ぐかを出す（D19）。エラーもここに出す——ボタンと別分岐にすると

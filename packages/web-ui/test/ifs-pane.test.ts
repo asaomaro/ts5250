@@ -1738,3 +1738,23 @@ describe("再読み込み", () => {
     w.unmount();
   });
 });
+
+
+describe("拡張版の初期フォルダー", () => {
+  it.each(["/home/USER", "/home/USER/"])("最初の一覧要求から指定フォルダー %s を読み、パンくずと内容もその場所を表示する", async (initialPath) => {
+    const paths: string[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const limits = limitsResponse(url);
+      if (limits) return limits;
+      const body = JSON.parse(String(init?.body ?? "{}")) as { path?: string };
+      if (body.path) paths.push(body.path);
+      return new Response(JSON.stringify({ entries: body.path === "/home/USER" ? [entry("start.txt")] : [], hasMore: false, canContinue: false }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const w = mount(IfsPane, { props: { tabId: "ifs:initial", system: "srv:s", initialPath } });
+    await flushPromises();
+    expect(paths[0]).toBe("/home/USER");
+    expect(w.find(".crumbs").text()).toContain("USER");
+    expect(w.find(".entries").text()).toContain("start.txt");
+    w.unmount();
+  });
+});

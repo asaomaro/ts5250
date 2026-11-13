@@ -8,7 +8,7 @@
  * 外でファイルが書き換えられたときは、呼び出し側が`key`を変えて作り直す
  */
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
-import type { SettingsFormValues, EmbedAppKind, WatermarkValue } from "../embed-protocol.js";
+import { embedConnectionError, type SettingsFormValues, type EmbedAppKind, type WatermarkValue } from "../embed-protocol.js";
 import { HOST_CODE_PAGE_OPTIONS, SPOOL_CODE_PAGES, DEFAULT_SPOOL_CCSID, hostCodePageOptionId, hostCodePageOptionOf } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE, type ScreenSize } from "../screenSizes.js";
 import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js";
@@ -39,6 +39,17 @@ const unrecognizedCcsid = codePageId.value === "unset" ? props.initial?.ccsid : 
 const terminal = ref<"5250" | "3270">(props.initial?.terminal ?? "5250");
 const screenSize = ref<ScreenSize>(props.initial?.screenSize ?? DEFAULT_SCREEN_SIZE);
 const deviceName = ref(props.initial?.deviceName ?? "");
+const allowPcCommand = ref(props.initial?.allowPcCommand ?? false);
+const enhanced = ref(props.initial?.enhanced ?? false);
+const deviceNameRetry = ref(props.initial?.deviceNameRetry ?? false);
+const keepAlive = ref(props.initial?.keepAlive ?? false);
+const associatedPrinter = ref(props.initial?.associatedPrinter ?? "");
+const pcAllow = ref(props.initial?.pcCommand?.allow?.join("\n") ?? "");
+const pcTimeoutSec = ref(props.initial?.pcCommand?.timeoutMs !== undefined ? String(props.initial.pcCommand.timeoutMs / 1000) : "");
+const autoPdfDir = ref(props.initial?.printer?.autoPdfDir ?? "");
+const autoPrint = ref(props.initial?.printer?.autoPrint ?? "");
+const ifsPath = ref(props.initial?.ifsPath ?? "");
+const sqlInitial = ref(props.initial?.sqlInitial ?? "");
 // **ウォーターマーク（画面に重ねる透かし）はemulatorのみ**（`ConfigCard.vue`の`wmForm`と
 // 同じフォーム構成——透かしはIBM iへ送らないブラウザだけの表示設定なので、装置名等と
 // 同じ「emulatorのみ意味を持つ」欄に並べる。`20260924-vscode-extension` D16。
@@ -82,9 +93,8 @@ const portInvalid = computed(() => {
   return !/^\d+$/.test(t) || Number(t) < 1 || Number(t) > 65535;
 });
 
-/** フォームの値を保存値へ畳む。不正な値があれば`undefined`（保存しない） */
-function build(): SettingsFormValues | undefined {
-  if (portInvalid.value) return undefined;
+/** 入力状態を保存値へ組み立てる。検証は build で行う。 */
+function buildValues(): SettingsFormValues {
   const v: SettingsFormValues = { host: host.value.trim() };
   if (port.value.trim() !== "") v.port = Number(port.value.trim());
   v.tls = tls.value;
@@ -100,22 +110,49 @@ function build(): SettingsFormValues | undefined {
   if (props.app === "spool" && spoolCcsid.value !== "unset") v.spoolCcsid = spoolCcsid.value;
   if (props.app === "emulator") {
     v.terminal = terminal.value;
+    v.allowPcCommand = allowPcCommand.value;
+    v.enhanced = enhanced.value;
+    v.associatedPrinter = associatedPrinter.value;
+    const pc: NonNullable<SettingsFormValues["pcCommand"]> = {};
+    const allow = pcAllow.value.split(/\r?\n/).map((p) => p.trim()).filter(Boolean);
+    if (allow.length) pc.allow = allow;
+    if (pcTimeoutSec.value.trim() !== "") pc.timeoutMs = Number(pcTimeoutSec.value) * 1000;
+    v.pcCommand = pc;
     // 3270はモデルでサイズが決まる（設定ファイルはモデル指定を持たない。design.md参照）ので送らない
     if (terminal.value !== "3270") v.screenSize = screenSize.value;
     const wm = buildWatermark();
     if (wm) v.watermark = wm;
   }
-  if ((props.app === "emulator" || props.app === "printer") && deviceName.value !== "") v.deviceName = deviceName.value;
+  if (props.app === "emulator" || props.app === "printer") {
+    if (deviceName.value !== "") v.deviceName = deviceName.value;
+    v.deviceNameRetry = deviceNameRetry.value;
+    v.keepAlive = keepAlive.value;
+  }
+  if (props.app === "printer") {
+    const printer: NonNullable<SettingsFormValues["printer"]> = {};
+    if (autoPdfDir.value.trim()) printer.autoPdfDir = autoPdfDir.value.trim();
+    if (autoPrint.value.trim()) printer.autoPrint = autoPrint.value.trim();
+    v.printer = printer;
+  }
+  if (props.app === "ifs") v.ifsPath = ifsPath.value.trim();
+  if (props.app === "sql") v.sqlInitial = sqlInitial.value;
   if (user.value !== "") v.user = user.value;
   if (password.value !== "") v.password = password.value;
   return v;
+}
+
+/** 不正な詳細設定を保存させない。画面・ファイル・メッセージは同じ検証を通す。 */
+const settingsError = computed(() => embedConnectionError(buildValues()));
+/** 保存可能な値だけを呼び出し元へ渡す。不正な入力は undefined として保存・接続を止める。 */
+function build(): SettingsFormValues | undefined {
+  return portInvalid.value || settingsError.value ? undefined : buildValues();
 }
 
 // 生成時（初期値の反映）は出さない——開いただけでファイルを書き換えないため
 // **`flush: "sync"`**——入力の直後（同じ処理の中）に「接続」が押されても、その時点で呼び出し側が変更を知っているようにする。
 // 既定（描画前にまとめて）だと、入力と押下が同じ処理で起きたとき`change`が押下より後に届き、保存を飛ばして古い設定で繋いだ
 // （実際の VSCode で再現。D34）
-watch([host, port, tls, codePageId, spoolCcsid, terminal, screenSize, deviceName, wmForm, user, password], () => emit("change", build()), {
+watch([host, port, tls, codePageId, spoolCcsid, terminal, screenSize, deviceName, allowPcCommand, enhanced, deviceNameRetry, keepAlive, associatedPrinter, pcAllow, pcTimeoutSec, autoPdfDir, autoPrint, ifsPath, sqlInitial, wmForm, user, password], () => emit("change", build()), {
   deep: true,
   flush: "sync"
 });
@@ -152,6 +189,7 @@ function buildWatermark(): WatermarkValue | undefined {
   <!-- **欄を役割で束ね、束を横に並べる**（D24。縦1列だとemulatorは縦スクロールが出た）。列の幅は
        `grid`の`auto-fit`で決まり、狭い画面では自然に1列へ折り返す -->
   <form ref="formEl" class="settings-form" @submit.prevent>
+    <p v-if="settingsError" class="field-error settings-error" role="alert">{{ settingsError }}</p>
     <div v-for="(col, i) in columns" :key="i" class="col">
       <template v-for="g in col" :key="g">
         <fieldset v-if="g === 'connection'" class="group">
@@ -176,6 +214,11 @@ function buildWatermark(): WatermarkValue | undefined {
               <option v-for="o in HOST_CODE_PAGE_OPTIONS" :key="o.id" :value="o.id">{{ o.label }}</option>
             </select>
           </div>
+          <div v-if="app === 'emulator' || app === 'printer'" class="row">
+            <label for="sf-keepalive" title="TCPキープアライブ">キープアライブ</label>
+            <input id="sf-keepalive" v-model="keepAlive" type="checkbox" />
+          </div>
+          <p v-if="app === 'emulator' || app === 'printer'" class="field-hint">無通信の接続をネットワーク機器が切断する環境向けです（既定は無効）</p>
           <div v-if="app === 'spool'" class="row">
             <label for="sf-spool-ccsid">スプール CCSID</label>
             <select id="sf-spool-ccsid" v-model="spoolCcsid" title="スプールの復号 CCSID（5250 画面用のコードページとは別）">
@@ -218,6 +261,64 @@ function buildWatermark(): WatermarkValue | undefined {
             <input id="sf-device" v-model="deviceName" type="text" :placeholder="app === 'printer' ? '例: PRT01' : '自動'" />
           </div>
           <p v-if="app === 'printer'" class="field-hint">未設定だと、自動構成をホストが許す場合だけ繋がります</p>
+          <div v-if="app === 'printer' || terminal === '5250'" class="row">
+            <label for="sf-device-retry">装置名競合回避</label>
+            <input id="sf-device-retry" v-model="deviceNameRetry" type="checkbox" />
+          </div>
+          <p v-if="app === 'printer' || terminal === '5250'" class="field-hint">装置名が使用中の場合に末尾の数字を繰り上げて再試行します（既定は無効）</p>
+          <template v-if="app === 'emulator' && terminal === '5250'">
+            <div class="row">
+              <label for="sf-enhanced">拡張5250 GUI</label>
+              <input id="sf-enhanced" v-model="enhanced" type="checkbox" />
+            </div>
+            <div class="row">
+              <label for="sf-associated-printer">関連プリンター</label>
+              <input id="sf-associated-printer" v-model="associatedPrinter" type="text" placeholder="装置名（未指定ならホストの既定）" />
+            </div>
+          </template>
+        </fieldset>
+        <fieldset v-else-if="g === 'pc-command' && terminal === '5250'" class="group">
+          <legend>PC コマンド（STRPCCMD）</legend>
+          <label class="pc-command-option" for="sf-pc-command">
+            <input id="sf-pc-command" v-model="allowPcCommand" type="checkbox" />
+            ホストからのPCコマンド実行を許可する
+          </label>
+          <p class="field-hint">拡張機能のローカルサーバーが動作している環境で実行します（次回接続から適用）</p>
+          <div class="row top">
+            <label for="sf-pc-allow">許可パターン</label>
+            <textarea id="sf-pc-allow" v-model="pcAllow" rows="3" placeholder="正規表現を1行1件（全体一致）。空なら制限なし" />
+          </div>
+          <p class="field-hint">prog:notepad のようにプログラム名でも指定できます</p>
+          <div class="row">
+            <label for="sf-pc-timeout" title="ホストが完了を待つ時間の上限">待ち時間（秒）</label>
+            <input id="sf-pc-timeout" v-model="pcTimeoutSec" type="text" inputmode="decimal" placeholder="60（既定）" />
+          </div>
+        </fieldset>
+        <fieldset v-else-if="g === 'printer-output'" class="group">
+          <legend>プリンター出力</legend>
+          <div class="row">
+            <label for="sf-pdf-dir">PDF保存先</label>
+            <input id="sf-pdf-dir" v-model="autoPdfDir" type="text" placeholder="空欄なら自動保存しない" />
+          </div>
+          <div class="row">
+            <label for="sf-auto-print">自動印刷先</label>
+            <input id="sf-auto-print" v-model="autoPrint" type="text" placeholder="プリンター名（空欄なら自動印刷しない）" />
+          </div>
+          <p class="field-hint">保存先・印刷先は拡張機能のローカルサーバーが動作している環境のものを指定します</p>
+        </fieldset>
+        <fieldset v-else-if="g === 'initial'" class="group">
+          <legend>{{ app === 'ifs' ? '初期フォルダー' : '初期SQL' }}</legend>
+          <div v-if="app === 'ifs'" class="row">
+            <label for="sf-ifs-path">IFSパス</label>
+            <input id="sf-ifs-path" v-model="ifsPath" type="text" placeholder="/（既定）" />
+          </div>
+          <template v-else>
+            <div class="row top">
+              <label for="sf-sql-initial">SQL文</label>
+              <textarea id="sf-sql-initial" v-model="sqlInitial" rows="5" placeholder="開いたときに入力欄へセットします" />
+            </div>
+            <p class="field-hint">自動実行はしません</p>
+          </template>
         </fieldset>
         <fieldset v-else-if="g === 'watermark'" class="group">
           <legend>透かし</legend>
@@ -312,6 +413,19 @@ function buildWatermark(): WatermarkValue | undefined {
 .field-hint {
   color: var(--muted);
 }
+.settings-error {
+  grid-column: 1 / -1;
+}
+.row.top {
+  align-items: flex-start;
+}
+.pc-command-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
 .row {
   display: flex;
   align-items: center;
@@ -328,6 +442,7 @@ function buildWatermark(): WatermarkValue | undefined {
 .row input[type="text"],
 .row input[type="password"],
 .row input[type="number"],
+.row textarea,
 .row select {
   flex: 1;
   min-width: 0;
