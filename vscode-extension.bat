@@ -91,7 +91,11 @@ if errorlevel 1 (
 
 echo ==^> building .vsix
 pushd vscode-extension
-call npx --yes @vscode/vsce package
+if /I "%~1"=="--build" (
+  call npm run package -- %2 %3
+) else (
+  call npm run package -- %*
+)
 if errorlevel 1 (
   popd
   echo vsce package failed 1>&2

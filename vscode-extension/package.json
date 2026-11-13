@@ -68,9 +68,9 @@
       "properties": {
         "ts5250.nodePath": {
           "type": "string",
-          "default": "node",
+          "default": "",
           "scope": "machine",
-          "description": "サーバーを実行する Node.js 26.4 以降の実行ファイル。PATH で見つからない場合は絶対パスを指定します"
+          "description": "通常は空欄のまま同梱 Node.js を使います。外部 Node.js 26.4 以降を使う場合だけ実行ファイルを指定します"
         }
       }
     }
@@ -78,11 +78,16 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b tsconfig.test.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "package": "node scripts/package.mjs",
+    "prepare-server": "node scripts/prepare-server.mjs",
+    "prepare-runtime": "node scripts/prepare-runtime.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^4.1.1",
+    "fflate": "^0.8.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

@@ -6,11 +6,12 @@ IBM i（AS/400）の **5250 エミュレーター・プリンター・スプー�
 - 接続先ごとに設定ファイルを作っておけば、エクスプローラーからダブルクリックで開けます
 - 空のファイルを作って開けば、あとは画面の欄で設定できます（「保存」でファイルに書きます）
 - パスワードは暗号化してファイルに保存します（平文では保存しません）
-- 別途 Node.js をインストールする必要はありません（VSCode 同梱の実行環境で動きます）
+- 別途 Node.js をインストールする必要はありません（拡張機能にサーバー専用の Node.js 26 を同梱しています）
 
 ## 動作環境
 
 - VSCode 1.90 以降
+- 同梱 Node.js 26 の動作条件：Windows 10/Server 2016 以降、macOS 13.5 以降、Linux は glibc 2.28 以降と libatomic（[公式の動作条件](https://github.com/nodejs/node/blob/v26.13.1/BUILDING.md#platform-list)）
 - 接続先の IBM i（TN5250 / ホストサーバー）へ、この PC から直接つながること
 
 ## インストール
@@ -161,9 +162,25 @@ Apache-2.0（[LICENSE](LICENSE)）。アイコンの字形は Noto Sans CJK JP�
 
 ### Node.js 26 と通信時間の設定
 
-サーバー実行には **外部 Node.js 26.4 以降**が必要です。VSCode 内蔵 Node の版には依存しません。
-VSCode が起動する環境の PATH に `node` を置くか、VSCode 設定の `ts5250.nodePath` に実行ファイルの絶対パスを指定してください。
-Remote / WSL / コンテナーでは、拡張ホストの環境へ導入します。
+サーバー専用の **Node.js 26.13.1 を VSIX に同梱**しています。追加インストールや起動時のダウンロードは不要です。
+VSCode 設定の `ts5250.nodePath` は通常は空欄のままにします。外部 Node.js 26.4 以降を使いたい場合だけ、実行ファイルを明示指定できます。
+VSCode 内蔵 Node のバージョンには依存しません。
+
+Windows / macOS / Linux（glibc）の x64・arm64 向けに別々の VSIX を作ります。VSCode が動く環境の OS/CPU に合うものを選びます。
+Remote / WSL / コンテナーでは、拡張ホスト側に合う VSIX が必要です。Alpine Linux（musl）向けは現在同梱対象外です。
+
+配布物を作る開発環境には Node.js 26.4 以降が必要です。リポジトリルートから次を実行します。
+
+```sh
+./vscode-extension.sh                         # 現在の OS/CPU 向け
+./vscode-extension.sh --target win32-x64       # Windows x64 向け
+./vscode-extension.sh --all                    # 全6種類
+```
+
+Windows は `vscode-extension.bat --target win32-x64` / `--all` を使えます。
+公式配布物を固定 SHA-256 で検証してから実行ファイルとライセンスだけを取り込みます。
+取得キャッシュは `.node-cache/`、同梱物は `server-stage/runtime/` に作り、Git には登録しません。
+Node.js を更新するときは `scripts/prepare-runtime.mjs` のバージョンと公式チェックサムを一緒に更新してください。
 
 接続前の設定画面に「確認開始まで（秒）」「再試行間隔（秒）」「応答なしの上限（回）」を追加しました。
 `keepAliveOptions` は `{ "initialDelayMs": 60000, "intervalMs": 15000, "count": 8 }` の形式です。

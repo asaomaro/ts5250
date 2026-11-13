@@ -41,3 +41,32 @@ jobs:
 
       - name: test（全ワークスペース。実機を要するものは skip される）
         run: npm test
+
+
+  bundled-extension:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26.4.0"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run build -w @ts5250/web-ui
+      - run: npm ci --prefix vscode-extension
+      - run: npm run build --prefix vscode-extension
+      - run: npm run typecheck --prefix vscode-extension
+      - if: runner.os == 'Linux'
+        run: npm test --prefix vscode-extension -- --no-file-parallelism
+      - run: node vscode-extension/scripts/prepare-server.mjs
+      - run: npm run package --prefix vscode-extension
+      - run: node vscode-extension/scripts/smoke-runtime.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-${{ matrix.os }}
+          path: vscode-extension/*.vsix
