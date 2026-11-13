@@ -11,7 +11,7 @@ rem Usage:
 rem   vscode-extension.bat            auto-build when not built or stale, then package
 rem   vscode-extension.bat --build    force rebuild, then package
 rem
-rem Output: vscode-extension\ts5250-vscode-<version>.vsix (vsce's default location)
+rem Output: vscode-extension\ts5250-vscode-<platform>-<version>.vsix
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 

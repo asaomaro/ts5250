@@ -20,8 +20,10 @@ Marketplace には公開していません。リポジトリのルートで `.vs
 
 ```sh
 ./vscode-extension.sh          # Windows は vscode-extension.bat
-code --install-extension vscode-extension/ts5250-vscode-0.1.0.vsix
+code --install-extension vscode-extension/ts5250-vscode-linux-x64-0.1.0.vsix
 ```
+
+上は Linux x64 の例です。Windows は `win32-x64` / `win32-arm64`、macOS は `darwin-x64` / `darwin-arm64` など、実際に生成した OS/CPU 名のファイルを指定します。
 
 VSCode の「拡張機能」ビューの「…」→「VSIX からのインストール…」でも入れられます。
 入れ直したときは、開いている **すべての** VSCode ウィンドウで「Developer: Reload Window」を実行してください。
