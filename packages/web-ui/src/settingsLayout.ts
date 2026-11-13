@@ -1,7 +1,7 @@
 import type { EmbedAppKind } from "./embed-protocol.js";
 
 /** 設定フォームの欄の束（`SettingsForm.vue`の`<fieldset>`1つ分） */
-export type SettingsGroup = "connection" | "signon" | "device" | "watermark";
+export type SettingsGroup = "connection" | "signon" | "device" | "watermark" | "pc-command" | "printer-output" | "initial";
 
 /**
  * 設定フォームの列ごとの束（`decisions.md` D24）。**縦1列に並べるとemulatorで縦スクロールが出た**ので、
@@ -9,7 +9,8 @@ export type SettingsGroup = "connection" | "signon" | "device" | "watermark";
  * 同じ表を読む——列数を片方にだけ書くと、カードが列に対して狭すぎ／広すぎになる
  */
 export function settingsColumnsOf(app: EmbedAppKind): SettingsGroup[][] {
-  if (app === "emulator") return [["connection", "signon"], ["device"], ["watermark"]];
-  if (app === "printer") return [["connection"], ["signon", "device"]];
+  if (app === "emulator") return [["connection", "signon"], ["device"], ["pc-command", "watermark"]];
+  if (app === "printer") return [["connection", "signon"], ["device", "printer-output"]];
+  if (app === "sql" || app === "ifs") return [["connection"], ["signon", "initial"]];
   return [["connection"], ["signon"]];
 }

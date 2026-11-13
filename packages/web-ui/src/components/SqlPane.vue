@@ -52,7 +52,7 @@ import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
  * 宛先が食い違う経路ができる。`PanePool` が配る値だけを使う。
  * 設定から消えたときは `undefined`（銘板はプールが出す。ここは操作させないだけでよい）。
  */
-const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
+const props = defineProps<{ tabId: string; active?: boolean; system?: string; initialSql?: string }>();
 
 interface Column {
   name: string;
@@ -63,7 +63,8 @@ interface Column {
 // `Row` と構造が食い違い、prop として渡せない（vue-tsc TS2719）
 type Row = Record<string, string | number | boolean | null | LobPlaceholder>;
 
-const sql = ref("");
+// 保存された SQL は入力欄へ置くだけ。実行は利用者の操作でのみ行う。
+const sql = ref(props.initialSql ?? "");
 /** 1 度に取得する件数。**上限ではなく 1 回の読み足し量** */
 const pageSize = ref(200);
 const PAGE_SIZES = [50, 200, 500, 1000] as const;
@@ -783,7 +784,7 @@ function blankQuery(): QuerySnapshot {
   };
 }
 
-const queries = ref<QuerySnapshot[]>([blankQuery()]);
+const queries = ref<QuerySnapshot[]>([{ ...blankQuery(), sql: sql.value }]);
 const activeId = ref(queries.value[0]!.id);
 
 /**

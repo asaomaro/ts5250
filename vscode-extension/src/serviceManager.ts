@@ -44,6 +44,8 @@ export interface ServiceManagerOptions {
   webRootPath: string;
   /** `--connections`に渡す値（`context.globalStorageUri/connections.json`） */
   connectionsPath: string;
+  /** PC コマンド等の信頼設定。拡張専用のサーバー設定ファイル */
+  profilesPath?: string;
   /** `--secret-key-file`に渡す値（`context.globalStorageUri/.env`） */
   secretKeyFilePath: string;
   /** このVSCodeウィンドウを識別する値（`extension.ts`が`activate`時に`crypto.randomUUID()`で生成） */
@@ -286,6 +288,16 @@ function defaultSpawnServer(opts: ServiceManagerOptions, port: number): ChildPro
     "--secret-key-file",
     opts.secretKeyFilePath
   ];
+  if (opts.profilesPath) {
+    // --profiles の明示指定は存在が必須。既存の設定を上書きせず初回だけ用意する。
+    mkdirSync(dirname(opts.profilesPath), { recursive: true });
+    try {
+      writeFileSync(opts.profilesPath, JSON.stringify({ systems: [], sessions: [] }), { flag: "wx", mode: 0o600 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    args.push("--profiles", opts.profilesPath);
+  }
   return spawn(process.execPath, args, {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
     stdio: ["ignore", "pipe", "pipe"]

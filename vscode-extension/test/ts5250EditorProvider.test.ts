@@ -65,11 +65,12 @@ async function setup(fileText: string) {
   const releaseService = vi.fn(async () => {});
   const syncSystem = vi.fn(async (_localPort: number, _input: unknown) => "own:mock");
   const log = vi.fn();
-  const provider = new Ts5250EditorProvider({ secretCrypto: crypto, acquireService, releaseService, syncSystem, log });
+  const syncSession = vi.fn(async (_localPort: number, _input: unknown) => "srv:mock-session");
+  const provider = new Ts5250EditorProvider({ secretCrypto: crypto, acquireService, releaseService, syncSystem, syncSession, log });
   const document = mockTextDocument(fileNameFor(fileText), fileText);
   const panel = mockWebviewPanel();
   await provider.resolveCustomTextEditor(document as never, panel as never, {} as never);
-  return { crypto, acquireService, releaseService, syncSystem, log, document, panel };
+  return { crypto, acquireService, releaseService, syncSystem, syncSession, log, document, panel };
 }
 
 function lastPostedOfType<T extends HostToWebviewMessage["type"]>(
@@ -553,5 +554,101 @@ describe("拡張子ごとの種別・空のファイル（D32）", () => {
   it("中身に別の app が書かれていても、拡張子の種別で開く", async () => {
     const { panel } = await open("file:///w/x.ts5250spl", '{"app":"emulator","host":"H"}');
     expect(panel.webview.html).toContain("embed.html?app=spool");
+  });
+});
+
+
+describe("PC コマンドの許可設定", () => {
+  it.each([true, false])("ファイルの許可=%s を表示・接続の両方へ渡す", async (allowPcCommand) => {
+    const { panel, syncSession } = await setup(JSON.stringify({ host: "AS400", allowPcCommand, deviceName: "TESTDEV", screenSize: "27x132" }));
+    panel.webview.fireMessage({ type: "ready" });
+    await flush();
+    expect(lastPostedOfType(panel, "loaded")?.payload.allowPcCommand).toBe(allowPcCommand);
+    expect(syncSession).not.toHaveBeenCalled();
+    panel.webview.fireMessage({ type: "connect" });
+    await flush();
+    expect(syncSession).toHaveBeenCalledWith(12345, expect.objectContaining({ allowPcCommand, host: "AS400", deviceName: "TESTDEV", screenSize: "27x132" }));
+    expect(lastPostedOfType(panel, "connect")?.payload.sessionRef).toBe("srv:mock-session");
+  });
+
+  it("許可の同期に失敗したら、直接接続へ倒さずエラーを返す", async () => {
+    const { panel, syncSession } = await setup('{"host":"AS400","allowPcCommand":true}');
+    syncSession.mockRejectedValueOnce(new Error("同期失敗"));
+    panel.webview.fireMessage({ type: "connect" });
+    await flush();
+    expect(lastPostedOfType(panel, "connect")).toBeUndefined();
+    expect(lastPostedOfType(panel, "saveError")).toBeDefined();
+  });
+
+  it("3270 には PC コマンドの設定を適用しない", async () => {
+    const { panel, syncSession } = await setup('{"host":"AS400","terminal":"3270","allowPcCommand":true}');
+    panel.webview.fireMessage({ type: "connect" });
+    await flush();
+    expect(syncSession).not.toHaveBeenCalled();
+    expect(lastPostedOfType(panel, "connect")?.payload.sessionRef).toBeUndefined();
+  });
+
+  it.each([true, false])("設定の保存で許可=%s をファイルへ書き、saved でも返す", async (allowPcCommand) => {
+    const { panel } = await setup('{"host":"AS400","allowPcCommand":true}');
+    panel.webview.fireMessage({ type: "save", payload: { host: "AS400", allowPcCommand } });
+    await flush();
+    const edit = applyEdit.mock.calls.at(-1)?.[0] as { replacements: { text: string }[] };
+    expect(JSON.parse(edit.replacements[0]!.text)).toMatchObject({ allowPcCommand });
+    expect(lastPostedOfType(panel, "saved")?.payload.allowPcCommand).toBe(allowPcCommand);
+  });
+
+  it.each([null, "true", 1, [], {}])("不正な許可設定 %j を保存しない", async (allowPcCommand) => {
+    const { panel } = await setup('{"host":"AS400"}');
+    panel.webview.fireMessage({ type: "save", payload: { host: "AS400", allowPcCommand } });
+    await flush();
+    expect(applyEdit).not.toHaveBeenCalled();
+    expect(lastPostedOfType(panel, "saveError")).toBeDefined();
+  });
+});
+
+
+describe("詳細設定の保存・接続", () => {
+  it("5250 の詳細設定と制限をロード・保存・接続へ通す", async () => {
+    const options = { enhanced: true, deviceNameRetry: true, keepAlive: true, associatedPrinter: "PRT_TEST", pcCommand: { allow: ["prog:notepad"], timeoutMs: 5000 } };
+    const { panel, syncSession } = await setup(JSON.stringify({ host: "AS400", ...options }));
+    panel.webview.fireMessage({ type: "ready" }); await flush();
+    expect(lastPostedOfType(panel, "loaded")?.payload).toMatchObject(options);
+    panel.webview.fireMessage({ type: "connect" }); await flush();
+    expect(syncSession).toHaveBeenCalledWith(12345, expect.objectContaining({ ...options, app: "emulator" }));
+    panel.webview.fireMessage({ type: "save", payload: { host: "AS400", ...options } }); await flush();
+    const edit = applyEdit.mock.calls.at(-1)?.[0] as { replacements: { text: string }[] };
+    expect(JSON.parse(edit.replacements[0]!.text)).toMatchObject(options);
+    expect(lastPostedOfType(panel, "saved")?.payload).toMatchObject(options);
+  });
+  it("プリンター出力の信頼設定も接続時に同期する", async () => {
+    const printer = { autoPdfDir: "/tmp/pdf", autoPrint: "PRT_TEST" };
+    const { panel, syncSession } = await setup(JSON.stringify({ app: "printer", host: "AS400", printer, keepAlive: true, deviceNameRetry: true }));
+    panel.webview.fireMessage({ type: "connect" }); await flush();
+    expect(syncSession).toHaveBeenCalledWith(12345, expect.objectContaining({ app: "printer", printer, keepAlive: true, deviceNameRetry: true }));
+    expect(lastPostedOfType(panel, "connect")?.payload.sessionRef).toBe("srv:mock-session");
+  });
+  it("3270 の TCP 設定も保存済み参照を使う", async () => {
+    const { panel, syncSession } = await setup('{"host":"AS400","terminal":"3270","keepAlive":true}');
+    panel.webview.fireMessage({ type: "connect" }); await flush();
+    expect(syncSession).toHaveBeenCalledWith(12345, expect.objectContaining({ app: "emulator", terminal: "3270", keepAlive: true }));
+  });
+  it.each(["ifs", "sql"] as const)("%s の初期値を保存・読込する", async (app) => {
+    const values = { ifsPath: "/home/USER", sqlInitial: "SELECT 1" };
+    const { panel } = await setup(JSON.stringify({ app, host: "AS400", ...values }));
+    panel.webview.fireMessage({ type: "save", payload: { host: "AS400", ...values } }); await flush();
+    expect(lastPostedOfType(panel, "saved")?.payload).toMatchObject(values);
+    const edit = applyEdit.mock.calls.at(-1)?.[0] as { replacements: { text: string }[] };
+    expect(JSON.parse(edit.replacements[0]!.text)).toMatchObject(values);
+  });
+  it("空の詳細オブジェクトで制限・出力先を明示的に解除する", async () => {
+    const { panel } = await setup('{"host":"AS400","pcCommand":{"allow":["prog:notepad"]}}');
+    panel.webview.fireMessage({ type: "save", payload: { host: "AS400", pcCommand: {} } }); await flush();
+    expect(lastPostedOfType(panel, "saved")?.payload.pcCommand).toEqual({});
+  });
+  it.each([{ pcCommand: { allow: [null] } }, { printer: [] }, { keepAlive: "false" }])("不正な詳細値 %j は保存しない", async (values) => {
+    const { panel } = await setup('{"host":"AS400"}');
+    panel.webview.fireMessage({ type: "save", payload: { host: "AS400", ...values } }); await flush();
+    expect(applyEdit).not.toHaveBeenCalled();
+    expect(lastPostedOfType(panel, "saveError")).toBeDefined();
   });
 });

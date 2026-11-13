@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import App from "../src/App.vue";
@@ -30,7 +30,7 @@ import { resetOpenedPanes } from "../src/composables/openedPanes.js";
  * 差し込み先を `document.querySelector` で探す——外れた木ではセレクタが当たらない。
  */
 
-const SYS_A = { ref: "own:a", name: "A", host: "h", autoSignon: false };
+const SYS_A = { ref: "own:a", name: "A", host: "h", autoSignon: false, sqlInitial: "SELECT 1", ifsPath: "/home/USER" };
 const SYS_B = { ref: "own:b", name: "B", host: "h", autoSignon: false };
 
 /**
@@ -76,6 +76,7 @@ beforeEach(() => {
   workspaceStore.tabSystem = {};
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   workspaceStore.showLauncher = false;
   workspaceStore.showSystemPicker = false;
   workspaceStore.maximizedGroupId = undefined;
@@ -279,6 +280,19 @@ describe("最大化・タブ移動をまたいでも残す", () => {
     await nextTick();
     expect(visible()).toHaveLength(2);
     expect((divider().element as HTMLElement).style.display).not.toBe("none");
+    w.unmount();
+  });
+});
+
+
+describe("通常版のシステムごとの初期表示", () => {
+  it("SQL・IFS ペインへ対象システムの初期値を配る", async () => {
+    vi.spyOn(systemsStore, "refresh").mockResolvedValue();
+    const w = await setup(["sql:query@own:a", "ifs:files@own:a"]);
+    expect(w.findComponent({ name: "SqlPane" }).props("initialSql")).toBe("SELECT 1");
+    workspaceStore.focusedGroup().activeTab = "ifs:files@own:a";
+    await nextTick(); await nextTick();
+    expect(w.findComponent({ name: "IfsPane" }).props("initialPath")).toBe("/home/USER");
     w.unmount();
   });
 });

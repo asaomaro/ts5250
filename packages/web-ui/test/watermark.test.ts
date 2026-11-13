@@ -289,7 +289,7 @@ describe("セッション設定画面からの往復", () => {
 
   it("表示を切っても文字は残る（enabled:false として保存）", async () => {
     const w = await openEdit(sessionCfg({ text: "本番" }));
-    await w.find('input[type="checkbox"]').setValue(false);
+    await w.find('[data-setting="watermarkEnabled"]').setValue(false);
     await save(w);
     expect(savedBody().watermark).toMatchObject({ text: "本番", enabled: false });
     w.unmount();

@@ -112,7 +112,7 @@ describe("SettingsForm", () => {
     await w.get("#sf-user").setValue("MYUSER");
     await nextTick();
     const saved = last(w);
-    expect(saved).toEqual({ host: "AS400", port: 992, tls: false, user: "MYUSER" });
+    expect(saved).toEqual({ host: "AS400", port: 992, tls: false, user: "MYUSER", sqlInitial: "" });
   });
 
   /**
@@ -263,9 +263,9 @@ describe("SettingsForm", () => {
 
   /** 欄を役割で束ねて横に並べる（D24。縦1列だとemulatorで縦スクロールが出た）。列の数は`EmbedApp`のカード幅と対 */
   it.each([
-    ["emulator", 3, ["接続先", "サインオン", "端末", "透かし"]],
-    ["printer", 2, ["接続先", "サインオン", "プリンター装置"]],
-    ["sql", 2, ["接続先", "サインオン"]]
+    ["emulator", 3, ["接続先", "サインオン", "端末", "PC コマンド（STRPCCMD）", "透かし"]],
+    ["printer", 2, ["接続先", "サインオン", "プリンター装置", "プリンター出力"]],
+    ["sql", 2, ["接続先", "サインオン", "初期SQL"]]
   ] as const)("%s: 列は%d、束は%j", (app, cols, legends) => {
     const w = mount(SettingsForm, { props: { app }, attachTo: document.body });
     expect(w.findAll(".col")).toHaveLength(cols);
@@ -364,5 +364,114 @@ describe("SettingsForm", () => {
       const saved = last(w);
       expect(saved).toMatchObject({ watermark: { opacity: 1, size: 200, angle: 90 } });
     });
+  });
+});
+
+
+describe("VSCode の PC コマンド実行許可", () => {
+  it("5250端末だけに表示し、既定は無効", async () => {
+    const w = mount(SettingsForm, { props: { app: "emulator" } });
+    expect(w.find<HTMLInputElement>("#sf-pc-command").element.checked).toBe(false);
+    await w.find("#sf-pc-command").setValue(true);
+    expect(last(w)?.allowPcCommand).toBe(true);
+    await w.find("#sf-pc-command").setValue(false);
+    expect(last(w)?.allowPcCommand).toBe(false);
+    await w.find("#sf-terminal").setValue("3270");
+    expect(w.find("#sf-pc-command").exists()).toBe(false);
+    w.unmount();
+  });
+  it.each(["printer", "spool", "sql", "ifs"] as const)("%s には表示しない", (app) => {
+    const w = mount(SettingsForm, { props: { app } });
+    expect(w.find("#sf-pc-command").exists()).toBe(false);
+    w.unmount();
+  });
+  it("保存済みの許可を復元し、他の項目の変更でも保つ", async () => {
+    const w = mount(SettingsForm, { props: { app: "emulator", initial: { host: "AS400", allowPcCommand: true } } });
+    expect(w.find<HTMLInputElement>("#sf-pc-command").element.checked).toBe(true);
+    await w.find("#sf-host").setValue("OTHER");
+    expect(last(w)?.allowPcCommand).toBe(true);
+    w.unmount();
+  });
+});
+
+
+describe("拡張版の詳細設定", () => {
+  it("5250 の GUI・関連プリンター・競合回避・TCP 設定を保存値へ渡す", async () => {
+    const w = mount(SettingsForm, { props: { app: "emulator", initial: { host: "AS400" } } });
+    for (const id of ["sf-enhanced", "sf-device-retry", "sf-keepalive"]) {
+      expect(w.find<HTMLInputElement>(`#${id}`).element.checked).toBe(false);
+      await w.find(`#${id}`).setValue(true);
+    }
+    await w.find("#sf-associated-printer").setValue(" prt01");
+    expect(last(w)).toMatchObject({ enhanced: true, deviceNameRetry: true, keepAlive: true, associatedPrinter: " prt01" });
+    await w.find("#sf-associated-printer").setValue("");
+    expect(last(w)?.associatedPrinter).toBe("");
+    await w.find("#sf-terminal").setValue("3270");
+    expect(w.find("#sf-enhanced").exists()).toBe(false);
+    expect(w.find("#sf-associated-printer").exists()).toBe(false);
+    expect(w.find("#sf-keepalive").exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("PC コマンドの許可パターン・待ち時間を読み戻し、無効時も保持する", async () => {
+    const w = mount(SettingsForm, { props: { app: "emulator", initial: { host: "AS400", allowPcCommand: false, pcCommand: { allow: ["prog:notepad"], timeoutMs: 120_000 } } } });
+    expect(w.find<HTMLTextAreaElement>("#sf-pc-allow").element.value).toBe("prog:notepad");
+    expect(w.find<HTMLInputElement>("#sf-pc-timeout").element.value).toBe("120");
+    await w.find("#sf-host").setValue("OTHER");
+    expect(last(w)).toMatchObject({ allowPcCommand: false, pcCommand: { allow: ["prog:notepad"], timeoutMs: 120_000 } });
+    await w.find("#sf-pc-allow").setValue("prog:notepad\necho .* ");
+    await w.find("#sf-pc-timeout").setValue("1.5");
+    expect(last(w)?.pcCommand).toEqual({ allow: ["prog:notepad", "echo .*"], timeoutMs: 1500 });
+    await w.find("#sf-pc-allow").setValue("");
+    await w.find("#sf-pc-timeout").setValue("");
+    expect(last(w)?.pcCommand).toEqual({});
+    w.unmount();
+  });
+
+  it("不正な正規表現・待ち時間は保存を止める", async () => {
+    const w = mount(SettingsForm, { props: { app: "emulator" } });
+    for (const pattern of ["[", "prog:"]) {
+      await w.find("#sf-pc-allow").setValue(pattern);
+      expect(last(w)).toBeUndefined();
+      expect(w.find('[role="alert"]').exists()).toBe(true);
+    }
+    await w.find("#sf-pc-allow").setValue("");
+    for (const time of ["0", "-1", "3601", "0.0001"]) {
+      await w.find("#sf-pc-timeout").setValue(time);
+      expect(last(w)).toBeUndefined();
+    }
+    await w.find("#sf-pc-timeout").setValue("60");
+    expect(last(w)?.pcCommand?.timeoutMs).toBe(60_000);
+    w.unmount();
+  });
+
+  it("プリンターだけに出力先を表示し、解除も保存値に反映する", async () => {
+    const w = mount(SettingsForm, { props: { app: "printer", initial: { host: "AS400", printer: { autoPdfDir: "/tmp/pdf", autoPrint: "PRT_TEST" } } } });
+    expect(w.find<HTMLInputElement>("#sf-pdf-dir").element.value).toBe("/tmp/pdf");
+    await w.find("#sf-host").setValue("OTHER");
+    expect(last(w)?.printer).toEqual({ autoPdfDir: "/tmp/pdf", autoPrint: "PRT_TEST" });
+    await w.find("#sf-pdf-dir").setValue("");
+    await w.find("#sf-auto-print").setValue("");
+    expect(last(w)?.printer).toEqual({});
+    w.unmount();
+    const emulator = mount(SettingsForm, { props: { app: "emulator" } });
+    expect(emulator.find("#sf-pdf-dir").exists()).toBe(false);
+    emulator.unmount();
+  });
+
+  it("IFS の初期フォルダーと SQL の初期文を保存し、他の種類には表示しない", async () => {
+    const ifs = mount(SettingsForm, { props: { app: "ifs", initial: { host: "AS400", ifsPath: "/home/USER" } } });
+    expect(ifs.find<HTMLInputElement>("#sf-ifs-path").element.value).toBe("/home/USER");
+    await ifs.find("#sf-ifs-path").setValue("relative");
+    expect(last(ifs)).toBeUndefined();
+    await ifs.find("#sf-ifs-path").setValue("/tmp");
+    expect(last(ifs)?.ifsPath).toBe("/tmp");
+    ifs.unmount();
+    const sql = mount(SettingsForm, { props: { app: "sql", initial: { host: "AS400", sqlInitial: "SELECT 1" } } });
+    expect(sql.find<HTMLTextAreaElement>("#sf-sql-initial").element.value).toBe("SELECT 1");
+    await sql.find("#sf-sql-initial").setValue("SELECT 2\nFROM SYSIBM.SYSDUMMY1");
+    expect(last(sql)?.sqlInitial).toBe("SELECT 2\nFROM SYSIBM.SYSDUMMY1");
+    expect(sql.find("#sf-ifs-path").exists()).toBe(false);
+    sql.unmount();
   });
 });

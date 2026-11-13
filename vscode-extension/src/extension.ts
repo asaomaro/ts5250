@@ -6,6 +6,7 @@ import { ServiceManager } from "./serviceManager.js";
 import { ExtensionSecretCrypto } from "./secretCrypto.js";
 import { Ts5250EditorProvider } from "./ts5250EditorProvider.js";
 import { syncSystem } from "./systemSync.js";
+import { syncSession } from "./sessionSync.js";
 
 /**
  * サーバー本体・web-uiの静的アセットの場所を、dev/packagedで出し分ける
@@ -66,6 +67,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     serverMainPath,
     webRootPath,
     connectionsPath: join(globalStorageDir, "connections.json"),
+    profilesPath: join(globalStorageDir, "profiles.json"),
     secretKeyFilePath: join(globalStorageDir, ".env"),
     windowId: randomUUID(),
     ...buildIdOption(serverMainPath, webRootPath),
@@ -124,6 +126,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // スプール/sql/ifs用（03-sql-ifs）。ローカルサーバーのportは
     // 呼び出し側（Ts5250EditorProvider）が`acquireService()`の結果から都度渡す
     syncSystem: (localPort, input) => syncSystem(input, { port: localPort, mappingFilePath: systemRefsPath }),
+    syncSession: (localPort, input) => syncSession(input, {
+      port: localPort,
+      mappingFilePath: join(globalStorageDir, "sessionRefs.json"),
+      systemMappingFilePath: join(globalStorageDir, "serverSystemRefs.json")
+    }),
     log: (message) => output.appendLine(message)
   });
 

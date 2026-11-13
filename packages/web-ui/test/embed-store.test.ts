@@ -164,3 +164,20 @@ describe("appKindFromQuery", () => {
     expect(embedStore.loaded).toEqual(payload);
   });
 });
+
+
+describe("詳細設定を含む受信ペイロード", () => {
+  beforeEach(() => { embedStore.loaded = undefined; embedStore.connect = undefined; });
+  it.each([{ pcCommand: null }, { pcCommand: { allow: "text" } }, { pcCommand: { allow: [42] } }, { printer: [] }, { printer: { autoPrint: false } }, { keepAlive: "false" }])("不正な詳細設定 %j はフォームへ渡さない", (options) => {
+    for (const type of ["loaded", "saved", "connect"]) {
+      window.dispatchEvent(new MessageEvent("message", { source: window, data: { type, payload: { app: "emulator", host: "AS400", ...options } } }));
+      expect(embedStore.loaded).toBeUndefined();
+      expect(embedStore.connect).toBeUndefined();
+    }
+  });
+  it("有効な詳細設定はそのまま受け取る", () => {
+    const payload = { app: "emulator", host: "AS400", pcCommand: { allow: ["prog:notepad"], timeoutMs: 1000 }, enhanced: true, keepAlive: true };
+    window.dispatchEvent(new MessageEvent("message", { source: window, data: { type: "loaded", payload } }));
+    expect(embedStore.loaded).toEqual(payload);
+  });
+});

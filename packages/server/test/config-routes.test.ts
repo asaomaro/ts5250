@@ -381,3 +381,35 @@ describe("信頼境界: PC コマンド（STRPCCMD）", () => {
     expect(list.sessions[0]?.pcCommand).toEqual({ enabled: true, allow: ["echo .*"] });
   });
 });
+
+
+describe("通常版の初期表示・通信設定", () => {
+  it.each(["open", "admin", "user"] as const)("%s: 許可された保存先で初期値と通信設定を往復する", async (mode) => {
+    const auth = mode === "open" ? undefined : buildWithAuth();
+    const app = auth?.app ?? buildOpen().app;
+    const token = mode === "admin" ? auth!.adminToken : mode === "user" ? auth!.userToken : undefined;
+    const source = mode === "user" ? "personal" : "server";
+    const res = await post(app, "/api/systems", { source, name: "initial", host: "AS400", ifsPath: "/home/USER", sqlInitial: "SELECT 1" }, token);
+    expect(res.status).toBe(201);
+    const { system } = await res.json() as { system: { ref: string } };
+    const headers = token ? { authorization: `Bearer ${token}` } : {};
+    const listing = await app.request("/api/systems", { headers });
+    const systems = await listing.json() as { systems: { ref: string; ifsPath?: string; sqlInitial?: string }[] };
+    expect(systems.systems.find((s) => s.ref === system.ref)).toMatchObject({ ifsPath: "/home/USER", sqlInitial: "SELECT 1" });
+    const opened = await post(app, "/api/sessions-config", { source, name: "details", system: system.ref, sessionType: "display", keepAlive: true, deviceNameRetry: true, enhanced: true }, token);
+    expect(opened.status).toBe(201);
+    const { session } = await opened.json() as { session: { ref: string } };
+    const sessionListing = await app.request("/api/sessions-config", { headers });
+    const sessions = await sessionListing.json() as { sessions: { ref: string }[] };
+    expect(sessions.sessions.find((s) => s.ref === session.ref)).toMatchObject({ enhanced: true, deviceNameRetry: true, keepAlive: true });
+    const updated = await app.request(`/api/systems/${system.ref}`, { method: "PUT", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ name: "initial", host: "AS400" }) });
+    expect(updated.status).toBe(200);
+    const cleared = await updated.json() as { system: Record<string, unknown> };
+    expect(cleared.system).not.toHaveProperty("ifsPath");
+    expect(cleared.system).not.toHaveProperty("sqlInitial");
+  });
+  it.each([{ ifsPath: "relative" }, { ifsPath: [] }, { sqlInitial: {} }])("初期値の不正な形 %j を拒否する", async (options) => {
+    const { app } = buildOpen();
+    expect((await post(app, "/api/systems", { source: "server", name: "bad", host: "AS400", ...options })).status).toBe(400);
+  });
+});

@@ -1,4 +1,4 @@
-import { EMBED_APP_EXTENSIONS, EMBED_APP_KINDS, type EmbedAppKind, type WatermarkValue } from "./protocol.js";
+import { EMBED_APP_EXTENSIONS, EMBED_APP_KINDS, type EmbedAppKind, type WatermarkValue, type EmbedConnectionOptions, embedConnectionError } from "./protocol.js";
 
 /**
  * 設定ファイル（`.ts5250emu`等。種別ごとに拡張子が違う——`EMBED_APP_EXTENSIONS`。D32）の中身の型。
@@ -9,7 +9,7 @@ import { EMBED_APP_EXTENSIONS, EMBED_APP_KINDS, type EmbedAppKind, type Watermar
  * `ConnectPayload`は`host`が必須（空文字列で代用する）なので、変換は呼び出し側
  * （`ts5250EditorProvider.ts`）が行う。
  */
-export interface Ts5250File {
+export interface Ts5250File extends EmbedConnectionOptions {
   app: EmbedAppKind;
   host?: string;
   port?: number;
@@ -21,10 +21,7 @@ export interface Ts5250File {
   terminal?: "5250" | "3270";
   deviceName?: string;
   screenSize?: "24x80" | "27x132";
-  enhanced?: boolean;
   watermark?: WatermarkValue;
-  ifsPath?: string;
-  sqlInitial?: string;
   signon?: {
     user?: string;
     /** `v1:iv:tag:ct`（`ExtensionSecretCrypto`で復号する） */
@@ -45,7 +42,8 @@ export type ParseResult = { ok: true; file: Ts5250File } | { ok: false; error: s
 /**
  * 設定ファイルのテキストを検証する。**厳密なスキーマ検証はしない**
  * （サーバー設定の`assertTypeConsistent`ほどの相互排他は課さない。単一ファイル・単一利用者なので実害が小さい）。
- * 見るのは「JSONのオブジェクトとして読めるか」だけ。種別（`app`）は呼び出し側が拡張子から渡す。
+ * JSON オブジェクトとして読めることに加え、詳細設定の型と範囲を共通プロトコルで検証する
+ * （文字列の "false" 等を実行許可に解釈しない）。種別（`app`）は呼び出し側が拡張子から渡す。
  * **空のファイル（空白だけを含む）は「何も設定していない」として受理する**——作ったばかりの空ファイルを開いて
  * 画面から設定できるようにするため（D32）。ファイルに`app`が書かれていても無視する（拡張子が正）
  */
@@ -60,6 +58,8 @@ export function parseTs5250File(text: string, app: EmbedAppKind): ParseResult {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, error: "トップレベルはオブジェクトである必要があります" };
   }
+  const settingsError = embedConnectionError(raw);
+  if (settingsError) return { ok: false, error: settingsError };
   return { ok: true, file: { ...(raw as Omit<Ts5250File, "app">), app } };
 }
 

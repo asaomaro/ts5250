@@ -5,7 +5,8 @@ import { appKindFromFileName, parseTs5250File, stringifyTs5250File, type Ts5250F
 import { buildShellHtml } from "./webviewHtml.js";
 import type { ExtensionSecretCrypto } from "./secretCrypto.js";
 import type { SystemSyncInput } from "./systemSync.js";
-import { EMBED_APP_EXTENSIONS, type ConnectPayload, type EmbedAppKind, type HostToWebviewMessage, type SettingsFormValues, type WebviewToHostMessage } from "./protocol.js";
+import type { SessionSyncInput } from "./sessionSync.js";
+import { EMBED_APP_EXTENSIONS, EMBED_CONNECTION_KEYS, embedConnectionError, type ConnectPayload, type EmbedAppKind, type HostToWebviewMessage, type SettingsFormValues, type WebviewToHostMessage } from "./protocol.js";
 
 /**
  * 設定ファイル（`.ts5250emu`等。種別は拡張子で決まる。D32）のCustom Text Editor。design.md「振る舞いの詳細」の各シーケンス図を実装する。
@@ -23,6 +24,8 @@ export interface Ts5250EditorProviderDeps {
    * `acquireService()`が解決するまで分からないため、呼び出し側が都度渡す
    */
   syncSystem: (localPort: number, input: SystemSyncInput) => Promise<string>;
+  /** 詳細設定・信頼設定をサーバー設定へ登録する。未実装なら詳細設定付きの接続は失敗させる */
+  syncSession?: (localPort: number, input: SessionSyncInput) => Promise<string>;
   /** 診断用ログ（design.md「ログ」）。失敗してもWebViewの表示は止めない経路で使う */
   log: (message: string) => void;
 }
@@ -130,9 +133,11 @@ function post(webview: vscode.Webview, msg: HostToWebviewMessage): void {
   void webview.postMessage(msg);
 }
 
-/** `SettingsFormValues`の最低限の形を確かめる（`host`が必須・文字列） */
+/** フォームの形と実行許可の型を確かめる（host は文字列、許可は省略または boolean）。 */
 function isSettingsFormValues(v: unknown): v is SettingsFormValues {
-  return typeof v === "object" && v !== null && typeof (v as { host?: unknown }).host === "string";
+  if (typeof v !== "object" || v === null) return false;
+  const p = v as Record<string, unknown>;
+  return typeof p.host === "string" && embedConnectionError(p) === undefined;
 }
 
 /**
@@ -188,8 +193,13 @@ async function sendConnect(
 ): Promise<void> {
   const file = parseOrInvalid(webview, document);
   if (!file) return;
-  const payload = await resolvePayload(file, document, localPort, deps);
-  post(webview, { type: "connect", payload: withTitle(payload, document) });
+  try {
+    const payload = await resolvePayload(file, document, localPort, deps);
+    post(webview, { type: "connect", payload: withTitle(payload, document) });
+  } catch (e) {
+    // 許可の同期に失敗したのに直接接続へ倒すと、保存した設定と実際の動作が食い違う。
+    post(webview, { type: "saveError", message: `接続設定を反映できません: ${e instanceof Error ? e.message : String(e)}` });
+  }
 }
 
 /**
@@ -207,10 +217,12 @@ async function sendConnect(
  *   （REST層はsystem参照を要求し、直接指定を受け付けないため）。`systemRef`が
  *   無いと対象ペインは開かず、「接続」ボタンの待機表示のまま止まる
  *
- * どちらも同期に失敗しても`connect`自体は送る——`systemRef`が無いまま
+ * 個人設定への同期に失敗しても`connect`自体は送る——`systemRef`が無いまま
  * （emulatorなら画面は開くがメッセージ表示等は使えない、printer/sql/ifsなら
  * ペインが開かない）。失敗の詳細は`deps.log`へ残す。design.md「エラー処理/異常系」と
  * 同じ「他のフィールドは尊重し、致命的に倒さない」方針
+ * 接続の詳細設定を持つ場合のサーバー設定同期は別で、失敗したら接続を止める。
+ * 設定と異なる許可状態のまま直接接続へ倒さないため。
  */
 async function resolvePayload(
   file: Ts5250File,
@@ -230,12 +242,27 @@ async function resolvePayload(
   if (file.tls !== undefined) input.tls = file.tls;
   if (file.ccsid !== undefined) input.ccsid = file.ccsid;
   if (file.spoolCcsid !== undefined) input.spoolCcsid = file.spoolCcsid;
+  if (file.ifsPath !== undefined) input.ifsPath = file.ifsPath;
+  if (file.sqlInitial !== undefined) input.sqlInitial = file.sqlInitial;
   if (user !== undefined) input.user = user;
   if (password !== undefined) input.password = password;
   try {
     payload.systemRef = await deps.syncSystem(localPort, input);
   } catch (e) {
     deps.log(`system同期に失敗しました（${file.app}）: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const is5250 = file.app === "emulator" && file.terminal !== "3270";
+  const transportSettings = file.keepAlive !== undefined || file.deviceNameRetry !== undefined;
+  const displaySettings = is5250 && [file.allowPcCommand, file.pcCommand, file.associatedPrinter, file.enhanced].some((v) => v !== undefined);
+  if ((isSessionApp(file.app) && transportSettings) || displaySettings || (file.app === "printer" && file.printer !== undefined)) {
+    if (!deps.syncSession) throw new Error("接続の詳細設定に対応していません");
+    const session: SessionSyncInput = { ...input, app: file.app as "emulator" | "printer" };
+    for (const key of EMBED_CONNECTION_KEYS) if (file[key] !== undefined) Object.assign(session, { [key]: file[key] });
+    if (file.terminal !== undefined) session.terminal = file.terminal;
+    if (file.deviceName !== undefined) session.deviceName = file.deviceName;
+    if (file.screenSize !== undefined) session.screenSize = file.screenSize;
+    if (file.katakanaVariant !== undefined) session.katakanaVariant = file.katakanaVariant;
+    payload.sessionRef = await deps.syncSession(localPort, session);
   }
   return payload;
 }
@@ -264,10 +291,8 @@ function buildConnectPayload(file: Ts5250File, crypto: ExtensionSecretCrypto): C
   if (file.terminal !== undefined) payload.terminal = file.terminal;
   if (file.deviceName !== undefined) payload.deviceName = file.deviceName;
   if (file.screenSize !== undefined) payload.screenSize = file.screenSize;
-  if (file.enhanced !== undefined) payload.enhanced = file.enhanced;
+  for (const key of EMBED_CONNECTION_KEYS) if (file[key] !== undefined) Object.assign(payload, { [key]: file[key] });
   if (file.watermark !== undefined) payload.watermark = file.watermark;
-  if (file.ifsPath !== undefined) payload.ifsPath = file.ifsPath;
-  if (file.sqlInitial !== undefined) payload.sqlInitial = file.sqlInitial;
   if (file.signon?.user !== undefined) payload.user = file.signon.user;
   if (typeof file.signon?.passwordEnc === "string") {
     try {
@@ -328,6 +353,12 @@ async function handleSave(
   else delete next.screenSize;
   if (values.watermark !== undefined) next.watermark = values.watermark;
   else delete next.watermark;
+  // 詳細設定はオブジェクト単位で置換する。空の pcCommand / printer は制限・出力先を明示的に解除する。
+  // 値自体が無い旧フォームでは既存設定を保持する。
+  for (const key of EMBED_CONNECTION_KEYS) {
+    const value = values[key];
+    if (value !== undefined) Object.assign(next, { [key]: value });
+  }
   if (values.deviceName !== undefined) next.deviceName = values.deviceName;
   else delete next.deviceName;
   if (values.user !== undefined || values.password !== undefined) {

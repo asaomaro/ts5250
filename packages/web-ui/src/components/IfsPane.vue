@@ -56,7 +56,7 @@ import { TEXT_CCSIDS, ccsidLabel } from "@ts5250/ebcdic/catalog";
  */
 const treeSplit = usePaneSplit({ initial: 220, min: 120, max: 600, axis: "x" });
 const listSplit = usePaneSplit({ initial: 380, min: 180, max: 1400, axis: "x" });
-const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
+const props = defineProps<{ tabId: string; active?: boolean; system?: string; initialPath?: string }>();
 
 const ROOT = "/";
 const source = () => ({ system: props.system });
@@ -815,7 +815,8 @@ function onDrop(ev: DragEvent): void {
 defineExpose({ uploadFiles, uploadPicked });
 
 void (async () => {
-  await openPath(ROOT);
+  // 初期フォルダーは最初に読む場所そのもの。ルートを表示してから移動すると不要な取得とちらつきが出る。
+  await openPath(props.initialPath?.replace(/\/+$/, "") || ROOT);
   // ルートは常に開いた状態で見せる（ツリーが空から始まると何も操作できない）
   if (!tree.expanded.value.has(ROOT)) await tree.toggle(ROOT);
 })();

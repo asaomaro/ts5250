@@ -35,6 +35,8 @@ export interface SystemForm {
   katakanaVariant?: "katakana" | "katakana-ex";
   /** スプール（SCS）用 CCSID。5250 画面用の ccsid とは別物（spec 方針2） */
   spoolCcsid?: number;
+  ifsPath?: string;
+  sqlInitial?: string;
   /** システムカラー（パレット番号 1〜8）。未設定なら ref から自動で割り当てる */
   color?: number;
   autoSignon?: boolean;
@@ -59,6 +61,8 @@ export interface SessionConfigForm {
   /** VT の文字符号化（`terminal: "vt"` のみ。既定 utf-8） */
   vtEncoding?: "utf-8" | "shift_jis" | "euc-jp";
   deviceName?: string;
+  deviceNameRetry?: boolean;
+  keepAlive?: boolean;
   /** 5250 の display のみ。関連付けプリンターの装置名（ホストへ IBMASSOCPRT として申告する） */
   associatedPrinter?: string;
   /** 5250 の display のみ。関連付けるプリンターセッションの設定の**参照**（`srv:` / `own:`。同じ保存先のプリンターの設定。装置名の方式とは排他） */

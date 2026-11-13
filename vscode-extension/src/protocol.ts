@@ -60,6 +60,66 @@ export interface WatermarkValue {
   color?: string;
 }
 
+/** 拡張版の接続前設定。表示側・保存側で同じ項目集合を使い、転記漏れを防ぐ。 */
+export interface EmbedConnectionOptions {
+  enhanced?: boolean;
+  allowPcCommand?: boolean;
+  /** enabled は allowPcCommand が唯一の入口。詳細設定だけをここに持つ */
+  pcCommand?: { allow?: string[]; timeoutMs?: number };
+  printer?: { autoPdfDir?: string; autoPrint?: string };
+  associatedPrinter?: string;
+  deviceNameRetry?: boolean;
+  keepAlive?: boolean;
+  ifsPath?: string;
+  /** 開いたときに入力する SQL。自動実行はしない */
+  sqlInitial?: string;
+}
+
+const EMBED_CONNECTION_FIELDS: Record<keyof EmbedConnectionOptions, true> = {
+  enhanced: true, allowPcCommand: true, pcCommand: true, printer: true, associatedPrinter: true,
+  deviceNameRetry: true, keepAlive: true, ifsPath: true, sqlInitial: true
+};
+export const EMBED_CONNECTION_KEYS = Object.keys(EMBED_CONNECTION_FIELDS) as (keyof EmbedConnectionOptions)[];
+
+/** ファイル・postMessage・フォームで同じ検証を使う。未指定は既存の既定値を保つ。 */
+export function embedConnectionError(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "設定の形式が不正です";
+  const v = value as Record<string, unknown>;
+  for (const key of ["enhanced", "allowPcCommand", "deviceNameRetry", "keepAlive"] as const) {
+    if (v[key] !== undefined && typeof v[key] !== "boolean") return `${key} は true または false で指定してください`;
+  }
+  for (const key of ["associatedPrinter", "ifsPath", "sqlInitial"] as const) {
+    if (v[key] !== undefined && typeof v[key] !== "string") return `${key} は文字列で指定してください`;
+  }
+  if (typeof v.ifsPath === "string" && v.ifsPath !== "" && !v.ifsPath.startsWith("/")) return "IFS の初期フォルダーは / から始まるパスで指定してください";
+  const pc = v.pcCommand;
+  if (pc !== undefined) {
+    if (!pc || typeof pc !== "object" || Array.isArray(pc)) return "PC コマンドの詳細設定はオブジェクトで指定してください";
+    const p = pc as Record<string, unknown>;
+    if (Object.keys(p).some((k) => k !== "allow" && k !== "timeoutMs")) return "PC コマンドの詳細設定に未対応の項目があります";
+    if (p.timeoutMs !== undefined && (typeof p.timeoutMs !== "number" || !Number.isInteger(p.timeoutMs) || p.timeoutMs <= 0 || p.timeoutMs > 3_600_000)) return "PC コマンドの待ち時間上限は 0 秒より大きく 3600 秒以下で指定してください";
+    if (p.allow !== undefined) {
+      if (!Array.isArray(p.allow) || p.allow.length === 0 || p.allow.some((x) => typeof x !== "string" || x.length === 0)) return "許可パターンは空でない文字列の配列で指定してください";
+      for (const pattern of p.allow as string[]) {
+        if (pattern.startsWith("prog:")) {
+          if (pattern.length === 5) return "prog: の後にプログラム名を指定してください";
+        } else {
+          try { new RegExp(`^(?:${pattern})$`); } catch { return "許可パターンの正規表現が不正です"; }
+        }
+      }
+    }
+  }
+  if (v.printer !== undefined) {
+    if (!v.printer || typeof v.printer !== "object" || Array.isArray(v.printer)) return "プリンターの出力設定はオブジェクトで指定してください";
+    const printer = v.printer as Record<string, unknown>;
+    if (Object.keys(printer).some((k) => k !== "autoPdfDir" && k !== "autoPrint")) return "プリンターの出力設定に未対応の項目があります";
+    for (const key of ["autoPdfDir", "autoPrint"] as const) {
+      if (printer[key] !== undefined && typeof printer[key] !== "string") return `${key} は文字列で指定してください`;
+    }
+  }
+  return undefined;
+}
+
 /** 拡張ホスト → WebView（shellを素通しして embed.html まで届く） */
 export type HostToWebviewMessage =
   /** ファイルを開いた直後・保存直後。**接続はしない**——表示・設定フォームの初期値用 */
@@ -78,7 +138,7 @@ export type WebviewToHostMessage =
   | { type: "save"; payload: SettingsFormValues }
   | { type: "openExternal"; url: string };
 
-export interface ConnectPayload {
+export interface ConnectPayload extends EmbedConnectionOptions {
   app: EmbedAppKind;
   host: string;
   /** 設定ファイル名（拡張子なし）。拡張ホストが付ける。画面の名前（本来のアプリのタブ名に当たる）に使う */
@@ -95,23 +155,19 @@ export interface ConnectPayload {
   deviceName?: string;
   /** emulatorのみ */
   screenSize?: "24x80" | "27x132";
-  /** emulatorのみ */
-  enhanced?: boolean;
   /** emulatorのみ。画面に重ねる透かし（表示だけの設定。ホストへは送らない） */
   watermark?: WatermarkValue;
-  /** ifsのみ。初期表示ディレクトリ */
-  ifsPath?: string;
-  /** sqlのみ。初期クエリ */
-  sqlInitial?: string;
   /** emulator/printer（セッション）のみ。`WsOpen` へ直接渡す平文（design.md「設計方針3」） */
   user?: string;
   /** emulator/printer（セッション）のみ */
   password?: string;
   /** spool/sql/ifsで必須、セッションでは付加的。個人設定への登録が済んだ参照（例 `own:3f2a...`） */
   systemRef?: string;
+  /** 拡張ホストが登録したサーバー設定のセッション参照。信頼設定を WS へ直接渡さない */
+  sessionRef?: string;
 }
 
-export interface SettingsFormValues {
+export interface SettingsFormValues extends EmbedConnectionOptions {
   host: string;
   port?: number;
   tls?: boolean;

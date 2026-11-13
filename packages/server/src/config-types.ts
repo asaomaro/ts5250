@@ -215,6 +215,10 @@ export const systemSchema = z
      * セッション階層には置かない: pull 型スプールはセッションに紐づかないため（spec 方針2）。
      */
     spoolCcsid: z.number().int().optional(),
+    /** IFS を開いたときのフォルダー。実行環境のローカルパスではなくホスト上のパス */
+    ifsPath: z.string().refine((v) => v === "" || v.startsWith("/"), "ifsPath must be absolute").optional(),
+    /** SQL ペインの初期入力。自動実行はしないので信頼設定ではない */
+    sqlInitial: z.string().optional(),
     /**
      * **システムカラー**（`20260802-tabs-own-system`）。パレットの番号（1〜8）。
      *
@@ -612,6 +616,9 @@ export interface PublicSystem {
   ref: string;
   name: string;
   host: string;
+  /** IFS・SQL の初期表示。SQL は入力欄に置くだけで自動実行しない */
+  ifsPath?: string;
+  sqlInitial?: string;
   port?: number;
   tls?: boolean;
   ccsid?: number;
@@ -681,6 +688,8 @@ export interface PublicSession {
   /** 3270 のモデル（既定 2）。2 と 5 のみ */
   model3270?: 2 | 5;
   deviceName?: string;
+  deviceNameRetry?: boolean;
+  keepAlive?: boolean;
   /** 5250 の display のみ。関連付けプリンターの装置名（IBMASSOCPRT。信頼設定ではない） */
   associatedPrinter?: string;
   /** 5250 の display のみ。関連付けるプリンターセッションの設定（同じファイルのプリンターの**参照**。`srv:` / `own:`） */
